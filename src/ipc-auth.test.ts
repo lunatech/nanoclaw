@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+import { DATA_DIR } from './config.js';
 import {
   _initTestDatabase,
   createTask,
@@ -8,7 +13,8 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { processGroupIpcFiles, processTaskIpc, IpcDeps } from './ipc.js';
+import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -35,6 +41,7 @@ const THIRD_GROUP: RegisteredGroup = {
 
 let groups: Record<string, RegisteredGroup>;
 let deps: IpcDeps;
+const cleanupPaths = new Set<string>();
 
 beforeEach(() => {
   _initTestDatabase();
@@ -62,6 +69,14 @@ beforeEach(() => {
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
   };
+});
+
+afterEach(() => {
+  for (const cleanupPath of cleanupPaths) {
+    fs.rmSync(cleanupPath, { recursive: true, force: true });
+  }
+  cleanupPaths.clear();
+  vi.restoreAllMocks();
 });
 
 // --- schedule_task authorization ---
@@ -486,6 +501,92 @@ describe('schedule_task schedule types', () => {
     );
 
     expect(getAllTasks()).toHaveLength(0);
+  });
+});
+
+describe('IPC watcher realpath protections', () => {
+  it('rejects symlinked messages directory outside the group IPC root', async () => {
+    const sourceGroup = 'symlink-group-messages';
+    groups['symlink-messages@g.us'] = {
+      name: 'Symlink Messages',
+      folder: sourceGroup,
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    };
+
+    const ipcBaseDir = path.join(DATA_DIR, 'ipc');
+    const groupRoot = path.join(ipcBaseDir, sourceGroup);
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'outside-messages-'));
+    cleanupPaths.add(groupRoot);
+    cleanupPaths.add(outsideDir);
+
+    fs.mkdirSync(groupRoot, { recursive: true });
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(outsideDir, 'payload.json'),
+      JSON.stringify({ type: 'message', chatJid: 'symlink-messages@g.us', text: 'hello' }),
+      'utf-8',
+    );
+    fs.symlinkSync(outsideDir, path.join(groupRoot, 'messages'), 'dir');
+
+    const sendMessage = vi.fn(async () => {});
+    const warnSpy = vi.spyOn(logger, 'warn');
+
+    await processGroupIpcFiles(sourceGroup, { ...deps, sendMessage }, groups, ipcBaseDir);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(
+      warnSpy.mock.calls.some(([, msg]) =>
+        String(msg).includes('Rejected IPC messages directory outside group IPC root'),
+      ),
+    ).toBe(true);
+    expect(fs.existsSync(path.join(outsideDir, 'payload.json'))).toBe(true);
+  });
+
+  it('rejects symlinked task files and does not process them', async () => {
+    const sourceGroup = 'symlink-group-tasks';
+    groups['symlink-tasks@g.us'] = {
+      name: 'Symlink Tasks',
+      folder: sourceGroup,
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    };
+
+    const ipcBaseDir = path.join(DATA_DIR, 'ipc');
+    const groupRoot = path.join(ipcBaseDir, sourceGroup);
+    const tasksDir = path.join(groupRoot, 'tasks');
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'outside-tasks-'));
+    cleanupPaths.add(groupRoot);
+    cleanupPaths.add(outsideDir);
+
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.mkdirSync(outsideDir, { recursive: true });
+    const outsideTaskPath = path.join(outsideDir, 'task.json');
+    fs.writeFileSync(
+      outsideTaskPath,
+      JSON.stringify({
+        type: 'schedule_task',
+        prompt: 'symlink task',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'symlink-tasks@g.us',
+      }),
+      'utf-8',
+    );
+    fs.symlinkSync(outsideTaskPath, path.join(tasksDir, 'task-link.json'));
+
+    const warnSpy = vi.spyOn(logger, 'warn');
+
+    await processGroupIpcFiles(sourceGroup, deps, groups, ipcBaseDir);
+
+    expect(getAllTasks()).toHaveLength(0);
+    expect(
+      warnSpy.mock.calls.some(([, msg]) =>
+        String(msg).includes('Rejected non-regular IPC task file'),
+      ),
+    ).toBe(true);
+    expect(fs.existsSync(path.join(tasksDir, 'task-link.json'))).toBe(true);
+    expect(fs.existsSync(outsideTaskPath)).toBe(true);
   });
 });
 
