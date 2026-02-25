@@ -4,7 +4,7 @@
  *
  * Fixes: Root→system systemd, WSL nohup fallback, no `|| true` swallowing errors.
  */
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -149,14 +149,29 @@ function setupLinux(projectRoot: string, nodePath: string, homeDir: string): voi
  * Prevents WhatsApp "conflict" disconnects when two instances connect simultaneously.
  */
 function killOrphanedProcesses(projectRoot: string): void {
-  try {
-    execSync(`pkill -f '${projectRoot}/dist/index\\.js' || true`, {
-      stdio: 'ignore',
-    });
-    logger.info('Stopped any orphaned nanoclaw processes');
-  } catch {
-    // pkill not available or no orphans
+  const matchPattern = buildOrphanedProcessMatchPattern(projectRoot);
+
+  const result = spawnSync('pkill', ['-f', matchPattern], {
+    stdio: 'ignore',
+    shell: false,
+  });
+
+  if (result.error) {
+    // pkill not available or failed to execute
+    return;
   }
+
+  // Exit code 0: killed one or more matches
+  // Exit code 1: no matches found
+  logger.info('Stopped any orphaned nanoclaw processes');
+}
+
+function escapeForExtendedRegex(value: string): string {
+  return value.replace(/[.[\]{}()*+?^$|\\]/g, '\\$&');
+}
+
+export function buildOrphanedProcessMatchPattern(projectRoot: string): string {
+  return `${escapeForExtendedRegex(path.join(projectRoot, 'dist', 'index.js'))}$`;
 }
 
 /**
