@@ -43,15 +43,22 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## WhatsApp Formatting (and other messaging apps)
+## Telegram Formatting
 
-Do NOT use markdown headings (##) in WhatsApp messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
+This bot is connected to *Telegram*, not WhatsApp.
+
+Telegram supports rich formatting:
+- *Bold* (single asterisks)
 - _Italic_ (underscores)
-- • Bullets (bullet points)
+- **Bold** (double asterisks also work)
+- __Underline__ (double underscores)
+- ~Strikethrough~ (tildes)
+- `Code` (backticks)
 - ```Code blocks``` (triple backticks)
+- [Links](https://example.com)
+- Emojis ✅
 
-Keep messages clean and readable for WhatsApp.
+Keep messages clean and readable for Telegram.
 
 ---
 
