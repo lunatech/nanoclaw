@@ -218,3 +218,18 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+## User Profile Summary
+
+*Raj Shekhar* - Senior Software Engineer, San Francisco Bay Area
+
+*Professional:* Distributed systems/cloud architect, privacy advocate, indie web enthusiast
+*Technical:* Following 77+ RSS feeds (AWS, distributed systems, DevOps, security)
+*Health:* Hindu vegetarian Tue/Thu only, weight loss + muscle building, tracking nutrition/workouts
+*Family:* Married, fertility treatment context (recent analysis: all normal)
+*Interests:* Technical depth, photography, finance/economics, open source
+*Values:* Privacy-first, open protocols, anti-algorithmic feeds, Web3 skeptical
+*Projects:* Indian ethnic wear business, real estate research (SF), email server admin
+*Communication:* Telegram formatting (asterisks/underscores), direct technical style
+
+Detailed profile: `user-profile.md`
