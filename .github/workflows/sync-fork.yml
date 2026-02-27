@@ -53,6 +53,7 @@ jobs:
         if: steps.prepare_sync.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
+          token: ${{ secrets.SYNC_PR_TOKEN }}
           branch: chore/sync-upstream-main
           base: main
           commit-message: "chore: sync fork with upstream main"
