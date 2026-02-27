@@ -131,18 +131,14 @@ function createSchema(database: Database.Database): void {
 
   // Add media_path column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN media_path TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN media_path TEXT`);
   } catch {
     /* column already exists */
   }
 
   // Add media_mime_type column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN media_mime_type TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN media_mime_type TEXT`);
   } catch {
     /* column already exists */
   }

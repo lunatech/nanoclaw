@@ -272,7 +272,9 @@ export class TelegramChannel implements Channel {
 
             const filename = `${ctx.message.message_id || Date.now()}.${ext}`;
             const fullPath = path.join(mediaDir, filename);
-            fs.writeFileSync(fullPath, buffer, { mode: MEDIA_FILE_INITIAL_MODE });
+            fs.writeFileSync(fullPath, buffer, {
+              mode: MEDIA_FILE_INITIAL_MODE,
+            });
             fs.chmodSync(fullPath, MEDIA_FILE_FINAL_MODE);
             mediaPath = `media/${filename}`;
 
