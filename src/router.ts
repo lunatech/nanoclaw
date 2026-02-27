@@ -44,12 +44,17 @@ function guessMimeTypeFromPath(filePath: string): string | null {
   return null;
 }
 
-export function getClaudeAttachments(messages: NewMessage[]): ClaudeAttachment[] {
+export function getClaudeAttachments(
+  messages: NewMessage[],
+): ClaudeAttachment[] {
   const attachments: ClaudeAttachment[] = [];
   for (const message of messages) {
     if (!message.media_path) continue;
-    const mimeType = normalizeMimeType(message.media_mime_type) || guessMimeTypeFromPath(message.media_path);
-    if (!mimeType || !CLAUDE_SUPPORTED_ATTACHMENT_MIME_TYPES.has(mimeType)) continue;
+    const mimeType =
+      normalizeMimeType(message.media_mime_type) ||
+      guessMimeTypeFromPath(message.media_path);
+    if (!mimeType || !CLAUDE_SUPPORTED_ATTACHMENT_MIME_TYPES.has(mimeType))
+      continue;
     attachments.push({
       path: `/workspace/group/${message.media_path}`,
       mimeType,
