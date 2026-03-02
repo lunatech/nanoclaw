@@ -133,6 +133,31 @@ export class TelegramChannel implements Channel {
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
+
+      // Determine if message is from a real user or from the bot itself
+      const senderId = ctx.from?.id.toString() || '';
+      const botId = ctx.me?.id.toString() || '';
+
+      // CRITICAL: Check if message was sent by the bot itself
+      // Messages sent via API with bot token appear as bot messages
+      // We need to allow these for external integrations (iPhone Shortcuts, webhooks, etc.)
+      const isFromBot = senderId === botId;
+
+      // For bot-sent messages, treat them as user messages if they contain specific patterns
+      // This allows external integrations to work while preventing bot loops
+      const isExternalIntegration = isFromBot && (
+        content.includes('📍') ||  // Location messages
+        content.includes('https://maps.google.com') ||  // Map links
+        content.match(/Lat(itude)?:/) ||  // Location coordinates
+        content.match(/Long(itude)?:/)
+      );
+
+      // Skip messages from bot unless they're from external integrations
+      if (isFromBot && !isExternalIntegration) {
+        logger.debug({ chatJid, content }, 'Skipping bot self-message');
+        return;
+      }
+
       const senderName =
         ctx.from?.first_name ||
         ctx.from?.username ||
