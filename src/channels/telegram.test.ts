@@ -413,7 +413,6 @@ describe('TelegramChannel', () => {
         }),
       );
     });
-
   });
 
   // --- @mention translation ---
