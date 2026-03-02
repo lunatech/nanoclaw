@@ -6,7 +6,15 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
+  'INJECT_SECRET',
+  'INJECT_HOST',
+  'INJECT_PORT',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -62,3 +70,23 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Inject endpoint configuration
+// INJECT_SECRET: required bearer token; if unset the inject server won't start
+// INJECT_HOST: bind address — set to your Tailscale IP (100.x.x.x) so only
+//              Tailscale peers can reach it (defaults to loopback/dev only)
+// INJECT_PORT: TCP port (default 3721)
+export const INJECT_SECRET =
+  process.env.INJECT_SECRET || envConfig.INJECT_SECRET || '';
+export const INJECT_HOST =
+  process.env.INJECT_HOST || envConfig.INJECT_HOST || '127.0.0.1';
+export const INJECT_PORT = parseInt(
+  process.env.INJECT_PORT || envConfig.INJECT_PORT || '3721',
+  10,
+);
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY =
+  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
