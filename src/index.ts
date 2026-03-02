@@ -4,6 +4,9 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
+  INJECT_HOST,
+  INJECT_PORT,
+  INJECT_SECRET,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TELEGRAM_BOT_TOKEN,
@@ -39,6 +42,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { startInjectServer } from './inject-server.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
@@ -523,6 +527,18 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });
+  // Start inject endpoint (only when INJECT_SECRET is configured)
+  if (INJECT_SECRET) {
+    startInjectServer({
+      host: INJECT_HOST,
+      port: INJECT_PORT,
+      secret: INJECT_SECRET,
+      registeredGroups: () => registeredGroups,
+    });
+  } else {
+    logger.debug('INJECT_SECRET not set — inject endpoint disabled');
+  }
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

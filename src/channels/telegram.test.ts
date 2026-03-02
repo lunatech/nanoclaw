@@ -116,7 +116,7 @@ function createTextCtx(overrides: {
       message_id: overrides.messageId ?? 1,
       entities: overrides.entities ?? [],
     },
-    me: { username: 'andy_ai_bot' },
+    me: { username: 'andy_ai_bot', id: 12345 },
     reply: vi.fn(),
   };
 }
@@ -413,6 +413,7 @@ describe('TelegramChannel', () => {
         }),
       );
     });
+
   });
 
   // --- @mention translation ---
