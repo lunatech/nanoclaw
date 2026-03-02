@@ -167,8 +167,12 @@ export class GroupQueue {
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      const messagePayload = typeof payload === 'string' ? { text: payload } : payload;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', ...messagePayload }));
+      const messagePayload =
+        typeof payload === 'string' ? { text: payload } : payload;
+      fs.writeFileSync(
+        tempPath,
+        JSON.stringify({ type: 'message', ...messagePayload }),
+      );
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {

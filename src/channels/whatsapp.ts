@@ -15,6 +15,7 @@ import makeWASocket, {
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
+  GROUPS_DIR,
   STORE_DIR,
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
@@ -37,7 +38,13 @@ function normalizeMimeType(mimeType?: string | null): string | undefined {
 }
 
 function sniffMimeType(buffer: Buffer): string | undefined {
-  if (buffer.length >= 4 && buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x25 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x44 &&
+    buffer[3] === 0x46
+  ) {
     return 'application/pdf';
   }
   if (
@@ -53,7 +60,12 @@ function sniffMimeType(buffer: Buffer): string | undefined {
   ) {
     return 'image/png';
   }
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
     return 'image/jpeg';
   }
   if (buffer.length >= 6) {
@@ -70,7 +82,10 @@ function sniffMimeType(buffer: Buffer): string | undefined {
   return undefined;
 }
 
-function extensionForMimeType(mimeType: string | undefined, isDocument: boolean): string {
+function extensionForMimeType(
+  mimeType: string | undefined,
+  isDocument: boolean,
+): string {
   switch (mimeType) {
     case 'application/pdf':
       return 'pdf';
@@ -265,18 +280,29 @@ export class WhatsAppChannel implements Channel {
             const mediaMsg = imgMsg || docMsg;
             if (mediaMsg) {
               try {
-                const buffer = await downloadMediaMessage(
-                  msg, 'buffer', {},
-                  { reuploadRequest: this.sock.updateMediaMessage, logger }
-                ) as Buffer;
-                mediaMimeType = sniffMimeType(buffer) || normalizeMimeType(mediaMsg.mimetype);
-                const ext = extensionForMimeType(mediaMimeType, Boolean(docMsg));
+                const buffer = (await downloadMediaMessage(
+                  msg,
+                  'buffer',
+                  {},
+                  { reuploadRequest: this.sock.updateMediaMessage, logger },
+                )) as Buffer;
+                mediaMimeType =
+                  sniffMimeType(buffer) || normalizeMimeType(mediaMsg.mimetype);
+                const ext = extensionForMimeType(
+                  mediaMimeType,
+                  Boolean(docMsg),
+                );
                 const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
-                fs.mkdirSync(mediaDir, { recursive: true, mode: MEDIA_DIR_MODE });
+                fs.mkdirSync(mediaDir, {
+                  recursive: true,
+                  mode: MEDIA_DIR_MODE,
+                });
                 fs.chmodSync(mediaDir, MEDIA_DIR_MODE);
                 const filename = `${msg.key.id || Date.now()}.${ext}`;
                 const fullPath = path.join(mediaDir, filename);
-                fs.writeFileSync(fullPath, buffer, { mode: MEDIA_FILE_INITIAL_MODE });
+                fs.writeFileSync(fullPath, buffer, {
+                  mode: MEDIA_FILE_INITIAL_MODE,
+                });
                 fs.chmodSync(fullPath, MEDIA_FILE_FINAL_MODE);
                 mediaPath = `media/${filename}`;
               } catch (err) {

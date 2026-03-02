@@ -109,7 +109,11 @@ describe('getClaudeAttachments', () => {
   it('returns supported image and pdf attachments', () => {
     const result = getClaudeAttachments([
       makeMsg({ media_path: 'media/a.jpg', media_mime_type: 'image/jpeg' }),
-      makeMsg({ id: '2', media_path: 'media/b.pdf', media_mime_type: 'application/pdf' }),
+      makeMsg({
+        id: '2',
+        media_path: 'media/b.pdf',
+        media_mime_type: 'application/pdf',
+      }),
     ]);
     expect(result).toEqual([
       { path: '/workspace/group/media/a.jpg', mimeType: 'image/jpeg' },
@@ -119,7 +123,11 @@ describe('getClaudeAttachments', () => {
 
   it('filters unsupported attachment types', () => {
     const result = getClaudeAttachments([
-      makeMsg({ media_path: 'media/a.docx', media_mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+      makeMsg({
+        media_path: 'media/a.docx',
+        media_mime_type:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      }),
     ]);
     expect(result).toEqual([]);
   });
