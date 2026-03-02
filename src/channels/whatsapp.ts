@@ -9,6 +9,7 @@ import makeWASocket, {
   downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
+  normalizeMessageContent,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
@@ -247,6 +248,11 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
+        // Unwrap container types (viewOnceMessageV2, ephemeralMessage,
+        // editedMessage, etc.) so that conversation, extendedTextMessage,
+        // imageMessage, etc. are accessible at the top level.
+        const normalized = normalizeMessageContent(msg.message);
+        if (!normalized) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
@@ -275,8 +281,8 @@ export class WhatsAppChannel implements Channel {
           let mediaMimeType: string | undefined;
           const group = groups[chatJid];
           if (group) {
-            const imgMsg = msg.message?.imageMessage;
-            const docMsg = msg.message?.documentMessage;
+            const imgMsg = normalized.imageMessage;
+            const docMsg = normalized.documentMessage;
             const mediaMsg = imgMsg || docMsg;
             if (mediaMsg) {
               try {
@@ -312,11 +318,11 @@ export class WhatsAppChannel implements Channel {
           }
 
           const content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            msg.message?.documentMessage?.caption ||
+            normalized.conversation ||
+            normalized.extendedTextMessage?.text ||
+            normalized.imageMessage?.caption ||
+            normalized.videoMessage?.caption ||
+            normalized.documentMessage?.caption ||
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)

@@ -355,21 +355,37 @@ export class TelegramChannel implements Channel {
       logger.error({ err: err.message }, 'Telegram bot error');
     });
 
-    // Start polling — returns a Promise that resolves when started
-    return new Promise<void>((resolve) => {
-      this.bot!.start({
-        onStart: (botInfo) => {
-          logger.info(
-            { username: botInfo.username, id: botInfo.id },
-            'Telegram bot connected',
-          );
-          console.log(`\n  Telegram bot: @${botInfo.username}`);
-          console.log(
-            `  Send /chatid to the bot to get a chat's registration ID\n`,
-          );
-          resolve();
-        },
-      });
+    // Start polling — reject if startup fails instead of hanging forever
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const rejectOnce = (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+
+      try {
+        void this.bot!.start({
+          onStart: (botInfo) => {
+            logger.info(
+              { username: botInfo.username, id: botInfo.id },
+              'Telegram bot connected',
+            );
+            console.log(`\n  Telegram bot: @${botInfo.username}`);
+            console.log(
+              `  Send /chatid to the bot to get a chat's registration ID\n`,
+            );
+            resolveOnce();
+          },
+        }).catch(rejectOnce);
+      } catch (err) {
+        rejectOnce(err);
+      }
     });
   }
 
