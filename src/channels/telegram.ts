@@ -145,12 +145,12 @@ export class TelegramChannel implements Channel {
 
       // For bot-sent messages, treat them as user messages if they contain specific patterns
       // This allows external integrations to work while preventing bot loops
-      const isExternalIntegration = isFromBot && (
-        content.includes('📍') ||  // Location messages
-        content.includes('https://maps.google.com') ||  // Map links
-        content.match(/Lat(itude)?:/) ||  // Location coordinates
-        content.match(/Long(itude)?:/)
-      );
+      const isExternalIntegration =
+        isFromBot &&
+        (content.includes('📍') || // Location messages
+          content.includes('https://maps.google.com') || // Map links
+          content.match(/Lat(itude)?:/) || // Location coordinates
+          content.match(/Long(itude)?:/));
 
       // Skip messages from bot unless they're from external integrations
       if (isFromBot && !isExternalIntegration) {
@@ -370,21 +370,19 @@ export class TelegramChannel implements Channel {
       };
 
       try {
-        void this.bot!
-          .start({
-            onStart: (botInfo) => {
-              logger.info(
-                { username: botInfo.username, id: botInfo.id },
-                'Telegram bot connected',
-              );
-              console.log(`\n  Telegram bot: @${botInfo.username}`);
-              console.log(
-                `  Send /chatid to the bot to get a chat's registration ID\n`,
-              );
-              resolveOnce();
-            },
-          })
-          .catch(rejectOnce);
+        void this.bot!.start({
+          onStart: (botInfo) => {
+            logger.info(
+              { username: botInfo.username, id: botInfo.id },
+              'Telegram bot connected',
+            );
+            console.log(`\n  Telegram bot: @${botInfo.username}`);
+            console.log(
+              `  Send /chatid to the bot to get a chat's registration ID\n`,
+            );
+            resolveOnce();
+          },
+        }).catch(rejectOnce);
       } catch (err) {
         rejectOnce(err);
       }
