@@ -146,8 +146,12 @@ function createSchema(database: Database.Database): void {
 
   // Add is_main column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(`ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`);
-    database.exec(`UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`);
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
+    );
+    database.exec(
+      `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+    );
   } catch {
     /* column already exists */
   }
