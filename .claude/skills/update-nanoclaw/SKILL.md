@@ -32,6 +32,8 @@ Run `/update-nanoclaw` in Claude Code.
 
 **Validation**: runs `npm run build` and `npm test`.
 
+**Breaking changes check**: after validation, reads CHANGELOG.md for any `[BREAKING]` entries introduced by the update. If found, shows each breaking change and offers to run the recommended skill to migrate.
+
 ## Rollback
 
 The backup tag is printed at the end of each run:
@@ -180,12 +182,49 @@ If build fails:
 - Do not refactor unrelated code.
 - If unclear, ask the user before making changes.
 
-# Step 6: Summary + rollback instructions
+# Step 6: Breaking changes check
+After validation succeeds, check if the update introduced any breaking changes.
+
+Determine which CHANGELOG entries are new by diffing against the backup tag:
+- `git diff <backup-tag-from-step-1>..HEAD -- CHANGELOG.md`
+
+Parse the diff output for lines starting with `+[BREAKING]`. Each such line is one breaking change entry. The format is:
+```
+[BREAKING] <description>. Run `/<skill-name>` to <action>.
+```
+
+If no `[BREAKING]` lines are found:
+- Skip this step silently. Proceed to Step 7 (skill updates check).
+
+If one or more `[BREAKING]` lines are found:
+- Display a warning header to the user: "This update includes breaking changes that may require action:"
+- For each breaking change, display the full description.
+- Collect all skill names referenced in the breaking change entries (the `/<skill-name>` part).
+- Use AskUserQuestion to ask the user which migration skills they want to run now. Options:
+  - One option per referenced skill (e.g., "Run /add-whatsapp to re-add WhatsApp channel")
+  - "Skip — I'll handle these manually"
+- Set `multiSelect: true` so the user can pick multiple skills if there are several breaking changes.
+- For each skill the user selects, invoke it using the Skill tool.
+- After all selected skills complete (or if user chose Skip), proceed to Step 7 (skill updates check).
+
+# Step 7: Check for skill updates
+After the summary, check if skills are distributed as branches in this repo:
+- `git branch -r --list 'upstream/skill/*'`
+
+If any `upstream/skill/*` branches exist:
+- Use AskUserQuestion to ask: "Upstream has skill branches. Would you like to check for skill updates?"
+  - Option 1: "Yes, check for updates" (description: "Runs /update-skills to check for and apply skill branch updates")
+  - Option 2: "No, skip" (description: "You can run /update-skills later any time")
+- If user selects yes, invoke `/update-skills` using the Skill tool.
+- After the skill completes (or if user selected no), proceed to Step 8.
+
+# Step 8: Summary + rollback instructions
 Show:
 - Backup tag: the tag name created in Step 1
 - New HEAD: `git rev-parse --short HEAD`
 - Upstream HEAD: `git rev-parse --short upstream/$UPSTREAM_BRANCH`
 - Conflicts resolved (list files, if any)
+- Breaking changes applied (list skills run, if any)
 - Remaining local diff vs upstream: `git diff --name-only upstream/$UPSTREAM_BRANCH..HEAD`
 
 Tell the user:

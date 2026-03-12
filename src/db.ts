@@ -82,7 +82,8 @@ function createSchema(database: Database.Database): void {
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
+      requires_trigger INTEGER DEFAULT 1,
+      is_main INTEGER DEFAULT 0
     );
   `);
 
@@ -139,6 +140,18 @@ function createSchema(database: Database.Database): void {
   // Add media_mime_type column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE messages ADD COLUMN media_mime_type TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Add is_main column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
+    );
+    database.exec(
+      `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+    );
   } catch {
     /* column already exists */
   }
@@ -311,24 +324,29 @@ export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
   botPrefix: string,
+  limit: number = 200,
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, media_path, media_mime_type
-    FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders})
-      AND is_bot_message = 0 AND COALESCE(content, '') NOT LIKE ?
-      AND ((content != '' AND content IS NOT NULL) OR media_path IS NOT NULL)
-    ORDER BY timestamp
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, media_path, media_mime_type
+      FROM messages
+      WHERE timestamp > ? AND chat_jid IN (${placeholders})
+        AND is_bot_message = 0 AND COALESCE(content, '') NOT LIKE ?
+        AND ((content != '' AND content IS NOT NULL) OR media_path IS NOT NULL)
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
   `;
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -342,20 +360,25 @@ export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
+  limit: number = 200,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, media_path, media_mime_type
-    FROM messages
-    WHERE chat_jid = ? AND timestamp > ?
-      AND is_bot_message = 0 AND COALESCE(content, '') NOT LIKE ?
-      AND ((content != '' AND content IS NOT NULL) OR media_path IS NOT NULL)
-    ORDER BY timestamp
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, media_path, media_mime_type
+      FROM messages
+      WHERE chat_jid = ? AND timestamp > ?
+        AND is_bot_message = 0 AND COALESCE(content, '') NOT LIKE ?
+        AND ((content != '' AND content IS NOT NULL) OR media_path IS NOT NULL)
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
   `;
   return db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
 export function createTask(
@@ -548,6 +571,7 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
+        is_main: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -569,6 +593,7 @@ export function getRegisteredGroup(
       : undefined,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    isMain: row.is_main === 1 ? true : undefined,
   };
 }
 
@@ -577,8 +602,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -587,6 +612,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+    group.isMain ? 1 : 0,
   );
 }
 
@@ -599,6 +625,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
+    is_main: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -619,6 +646,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         : undefined,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      isMain: row.is_main === 1 ? true : undefined,
     };
   }
   return result;

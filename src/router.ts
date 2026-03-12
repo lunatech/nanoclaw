@@ -1,4 +1,5 @@
 import { Channel, ClaudeAttachment, NewMessage } from './types.js';
+import { formatLocalTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -9,15 +10,24 @@ export function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function formatMessages(messages: NewMessage[]): string {
+export function formatMessages(
+  messages: NewMessage[],
+  timezone?: string,
+): string {
   const lines = messages.map((m) => {
     let body = escapeXml(m.content);
     if (m.media_path) {
       body += `\n[Media attached — use Read tool to view: /workspace/group/${m.media_path}]`;
     }
-    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${body}</message>`;
+    const displayTime = timezone
+      ? formatLocalTime(m.timestamp, timezone)
+      : m.timestamp;
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${body}</message>`;
   });
-  return `<messages>\n${lines.join('\n')}\n</messages>`;
+  const header = timezone
+    ? `<context timezone="${escapeXml(timezone)}" />\n`
+    : '';
+  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 const CLAUDE_SUPPORTED_ATTACHMENT_MIME_TYPES = new Set([
