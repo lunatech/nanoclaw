@@ -10,6 +10,7 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+import { registerChannel } from './registry.js';
 
 const MEDIA_DIR_MODE = 0o700;
 const MEDIA_FILE_INITIAL_MODE = 0o600;
@@ -442,3 +443,9 @@ export class TelegramChannel implements Channel {
     }
   }
 }
+
+registerChannel('telegram', (opts) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+  return new TelegramChannel(token, opts);
+});

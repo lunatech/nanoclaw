@@ -1,5 +1,6 @@
 import { Channel, ClaudeAttachment, NewMessage } from './types.js';
 import { formatLocalTime } from './timezone.js';
+import { tryParseSingleUntrustedBlock } from './untrusted-content.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -15,7 +16,7 @@ export function formatMessages(
   timezone?: string,
 ): string {
   const lines = messages.map((m) => {
-    let body = escapeXml(m.content);
+    let body = formatPromptContent(m.content);
     if (m.media_path) {
       body += `\n[Media attached — use Read tool to view: /workspace/group/${m.media_path}]`;
     }
@@ -28,6 +29,23 @@ export function formatMessages(
     ? `<context timezone="${escapeXml(timezone)}" />\n`
     : '';
   return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+}
+
+function formatPromptContent(content: string): string {
+  const parsed = tryParseSingleUntrustedBlock(content);
+  if (!parsed) return escapeXml(content);
+
+  const segments: string[] = [];
+  if (parsed.before) {
+    segments.push(escapeXml(parsed.before));
+  }
+  segments.push('[UNTRUSTED EMAIL BEGIN]');
+  segments.push(escapeXml(parsed.content));
+  segments.push('[UNTRUSTED EMAIL END]');
+  if (parsed.after) {
+    segments.push(escapeXml(parsed.after));
+  }
+  return segments.join('\n');
 }
 
 const CLAUDE_SUPPORTED_ATTACHMENT_MIME_TYPES = new Set([
