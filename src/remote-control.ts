@@ -14,9 +14,9 @@ interface RemoteControlSession {
 }
 
 let activeSession: RemoteControlSession | null = null;
-let pendingStart:
-  | Promise<{ ok: true; url: string } | { ok: false; error: string }>
-  | null = null;
+let pendingStart: Promise<
+  { ok: true; url: string } | { ok: false; error: string }
+> | null = null;
 
 const URL_REGEX = /https:\/\/claude\.ai\/code\S+/;
 const URL_TIMEOUT_MS = 30_000;
