@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import path from 'path';
 
+import { buildOrphanedProcessMatchPattern } from './service.js';
+
 /**
  * Tests for service configuration generation.
  *
@@ -70,6 +72,18 @@ StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 [Install]
 WantedBy=${isSystem ? 'multi-user.target' : 'default.target'}`;
 }
+
+describe('orphaned process match pattern', () => {
+  it('escapes regex metacharacters in project paths', () => {
+    const projectRoot = String.raw`/tmp/odd path/it's [complicated] (v2)+$`;
+    const pattern = buildOrphanedProcessMatchPattern(projectRoot);
+
+    expect(pattern).toBe(String.raw`/tmp/odd path/it's \[complicated\] \(v2\)\+\$/dist/index\.js$`);
+    expect(pattern).not.toContain(';');
+    expect(pattern).not.toContain('||');
+  });
+});
+
 
 describe('plist generation', () => {
   it('contains the correct label', () => {
