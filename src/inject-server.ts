@@ -148,7 +148,6 @@ export function startInjectServer(opts: InjectServerOpts): http.Server {
       }
 
       const chatJid = data.chatJid;
-
       if (!chatJid || typeof chatJid !== 'string') {
         sendJson(400, { error: 'chatJid is required' });
         return;
