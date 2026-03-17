@@ -15,7 +15,6 @@ groups/*
 !groups/global/
 groups/main/*
 groups/global/*
-!groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 
 # Secrets
@@ -31,6 +30,7 @@ groups/global/*
 # IDE
 .idea/
 .vscode/
+.claude/settings.local.json
 
 # Skills system (local per-installation state)
 .nanoclaw/

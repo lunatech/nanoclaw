@@ -117,8 +117,7 @@ export function commandExists(name: string): boolean {
 
 export function getNodeVersion(): string | null {
   try {
-    const version = execSync('node --version', { encoding: 'utf-8' }).trim();
-    return version.replace(/^v/, '');
+    return process.version.replace(/^v/, '');
   } catch {
     return null;
   }
