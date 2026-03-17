@@ -2,6 +2,13 @@
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
+## Shared Work Queue
+
+Use `WORK_QUEUE.org` as the canonical shared task tracker for local repo work
+when that file exists in the current worktree. It is intended to stay
+untracked. Agents should check it before starting substantial changes and
+update task status, branch, commit, and timestamps there as work progresses.
+
 ## Quick Context
 
 Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.

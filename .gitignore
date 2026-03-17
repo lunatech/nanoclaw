@@ -23,6 +23,7 @@ groups/global/*
 
 # Temp files
 .tmp-*
+WORK_QUEUE.org
 
 # OS
 .DS_Store
