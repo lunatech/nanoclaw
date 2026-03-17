@@ -564,16 +564,8 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
-      const trimmed = msg.content.trim();
-      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
-        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
-          logger.error({ err, chatJid }, 'Remote control command error'),
-        );
-        return;
-      }
-
-      // Sender allowlist drop mode: discard messages from denied senders before storing
+      // Sender allowlist drop mode: discard messages from denied senders first,
+      // including privileged remote-control commands.
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
         if (
@@ -588,6 +580,15 @@ async function main(): Promise<void> {
           }
           return;
         }
+      }
+
+      // Remote control commands — intercept before storage
+      const trimmed = msg.content.trim();
+      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
+        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
       }
       storeMessage(msg);
     },

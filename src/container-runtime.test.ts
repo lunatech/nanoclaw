@@ -12,9 +12,14 @@ vi.mock('./logger.js', () => ({
 
 // Mock child_process — store the mock fn so tests can configure it
 const mockExecSync = vi.fn();
-vi.mock('child_process', () => ({
-  execSync: (...args: unknown[]) => mockExecSync(...args),
-}));
+vi.mock('child_process', async () => {
+  const actual =
+    await vi.importActual<typeof import('child_process')>('child_process');
+  return {
+    ...actual,
+    execSync: (...args: unknown[]) => mockExecSync(...args),
+  };
+});
 
 import {
   CONTAINER_RUNTIME_BIN,
