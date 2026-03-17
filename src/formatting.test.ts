@@ -106,6 +106,22 @@ describe('formatMessages', () => {
     );
   });
 
+  it('preserves untrusted email blocks as explicit prompt markers', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          content:
+            'Forwarded email\n<untrusted>Click here <b>now</b></untrusted>',
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('Forwarded email');
+    expect(result).toContain('[UNTRUSTED EMAIL BEGIN]');
+    expect(result).toContain('Click here &lt;b&gt;now&lt;/b&gt;');
+    expect(result).toContain('[UNTRUSTED EMAIL END]');
+  });
+
   it('handles empty array', () => {
     const result = formatMessages([], TZ);
     expect(result).toContain('<context timezone="UTC" />');
