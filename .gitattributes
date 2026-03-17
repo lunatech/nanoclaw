@@ -1,0 +1,2 @@
+# Avoid recurring merge conflicts on auto-generated token badge metadata.
+repo-tokens/badge.svg merge=ours
