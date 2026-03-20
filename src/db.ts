@@ -34,6 +34,7 @@ function createSchema(database: Database.Database): void {
       is_bot_message INTEGER DEFAULT 0,
       media_path TEXT,
       media_mime_type TEXT,
+      reply_to TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -105,6 +106,13 @@ function createSchema(database: Database.Database): void {
     database
       .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
       .run(`${ASSISTANT_NAME}:%`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Add reply_to column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN reply_to TEXT`);
   } catch {
     /* column already exists */
   }
@@ -278,7 +286,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, media_path, media_mime_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, media_path, media_mime_type, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -290,6 +298,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.is_bot_message ? 1 : 0,
     msg.media_path ?? null,
     msg.media_mime_type ?? null,
+    msg.replyTo ?? null,
   );
 }
 
@@ -334,7 +343,7 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, media_path, media_mime_type
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, media_path, media_mime_type, reply_to AS replyTo
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND COALESCE(content, '') NOT LIKE ?
@@ -367,7 +376,7 @@ export function getMessagesSince(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, media_path, media_mime_type
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, media_path, media_mime_type, reply_to AS replyTo
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND COALESCE(content, '') NOT LIKE ?
