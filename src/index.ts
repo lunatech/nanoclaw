@@ -217,9 +217,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // React 👀 on each incoming message to signal "processing"
+  const messageIds = missedMessages.map((m) => m.id);
+  for (const mid of messageIds) {
+    channel.setReaction?.(chatJid, mid, '👀')?.catch(() => {});
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+
+  // After 60s without output, switch to ⏳ so the user knows it's still working
+  const slowTimer = setTimeout(() => {
+    if (!outputSentToUser) {
+      for (const mid of messageIds) {
+        channel.setReaction?.(chatJid, mid, '⏳')?.catch(() => {});
+      }
+    }
+  }, 60000);
 
   const output = await runAgent(
     group,
@@ -241,6 +256,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         );
         if (text) {
           await channel.sendMessage(chatJid, text);
+          if (!outputSentToUser) {
+            // Switch to ✅ on first output
+            for (const mid of messageIds) {
+              channel.setReaction?.(chatJid, mid, '✅')?.catch(() => {});
+            }
+          }
           outputSentToUser = true;
         }
         // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -258,6 +279,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   await channel.setTyping?.(chatJid, false);
+  clearTimeout(slowTimer);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
@@ -277,6 +299,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
     );
+    for (const mid of messageIds) {
+      channel.setReaction?.(chatJid, mid, '❌')?.catch(() => {});
+    }
     return false;
   }
 
@@ -441,12 +466,11 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
           const attachments = getClaudeAttachments(messagesToSend);
 
-          if (
-            queue.sendMessage(chatJid, {
-              text: formatted,
-              attachments,
-            })
-          ) {
+          if (queue.sendMessage(chatJid, { text: formatted, attachments })) {
+            // React 👀 to signal the active container is picking this up
+            for (const gm of groupMessages) {
+              channel.setReaction?.(chatJid, gm.id, '👀')?.catch(() => {});
+            }
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',

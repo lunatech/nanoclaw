@@ -23,7 +23,10 @@ export function formatMessages(
     const displayTime = timezone
       ? formatLocalTime(m.timestamp, timezone)
       : m.timestamp;
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${body}</message>`;
+    const replyPrefix = m.replyTo
+      ? `[In reply to: "${escapeXml(m.replyTo)}"]\n`
+      : '';
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${replyPrefix}${body}</message>`;
   });
   const header = timezone
     ? `<context timezone="${escapeXml(timezone)}" />\n`

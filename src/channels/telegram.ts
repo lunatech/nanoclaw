@@ -223,6 +223,7 @@ export class TelegramChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        replyTo: ctx.message.reply_to_message?.text,
       });
 
       logger.info(
@@ -351,6 +352,47 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
     this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
+    // Handle emoji reactions on messages
+    this.bot.on('message_reaction', (ctx) => {
+      const reaction = (ctx.update as any).message_reaction;
+      if (!reaction) return;
+
+      const chatId = reaction.chat?.id;
+      if (!chatId) return;
+
+      const jid = `tg:${chatId}`;
+      const group = this.opts.registeredGroups()[jid];
+      if (!group) return;
+
+      const newEmojis = (reaction.new_reaction as any[])
+        .filter((r) => r.type === 'emoji')
+        .map((r) => r.emoji)
+        .join('');
+
+      if (!newEmojis) return; // reaction removed, ignore
+
+      const fromName =
+        reaction.user?.first_name || reaction.user?.username || 'User';
+      const timestamp = new Date().toISOString();
+
+      this.opts.onMessage(jid, {
+        id: `reaction-${reaction.message_id}-${Date.now()}`,
+        chat_jid: jid,
+        sender: reaction.user?.id?.toString() ?? 'unknown',
+        sender_name: fromName,
+        content: JSON.stringify({
+          _type: 'message_reaction',
+          emoji: newEmojis,
+          message_id: reaction.message_id,
+          from_name: fromName,
+          text: `[reaction: ${newEmojis}] on message #${reaction.message_id}`,
+        }),
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+      });
+    });
+
     // Handle errors gracefully
     this.bot.catch((err) => {
       logger.error({ err: err.message }, 'Telegram bot error');
@@ -372,6 +414,7 @@ export class TelegramChannel implements Channel {
 
       try {
         void this.bot!.start({
+          allowed_updates: ['message', 'callback_query', 'message_reaction'],
           onStart: (botInfo) => {
             logger.info(
               { username: botInfo.username, id: botInfo.id },
@@ -440,6 +483,24 @@ export class TelegramChannel implements Channel {
       await this.bot.api.sendChatAction(numericId, 'typing');
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
+    }
+  }
+
+  async setReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
+    if (!this.bot) return;
+    try {
+      const numericChatId = jid.replace(/^tg:/, '');
+      const numericMsgId = parseInt(messageId, 10);
+      if (isNaN(numericMsgId)) return;
+      await this.bot.api.setMessageReaction(numericChatId, numericMsgId, [
+        { type: 'emoji', emoji } as { type: 'emoji'; emoji: any },
+      ]);
+    } catch (err) {
+      logger.debug({ jid, messageId, emoji, err }, 'Failed to set reaction');
     }
   }
 }
