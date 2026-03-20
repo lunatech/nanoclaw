@@ -1,6 +1,7 @@
 # Email Forwarding to NanoClaw
 
 NanoClaw exposes a dedicated email ingestion endpoint at `POST /inject/email`.
+`GET /inject/email` is not a health check and will not ingest mail.
 
 This path is intended for a mail-server delivery script that:
 
@@ -58,6 +59,22 @@ The script exits non-zero when:
 - the HTTP request fails
 
 Only route mail that you explicitly want NanoClaw to see. Keep the HTTP endpoint private, ideally on Tailscale or another private network.
+
+## Manual probe
+
+Use an authenticated `POST`, not `GET`, when checking whether the endpoint is
+up:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $INJECT_SECRET" \
+  -H "Content-Type: application/json" \
+  --data '{}' \
+  http://127.0.0.1:3721/inject/email
+```
+
+If the server is reachable, that probe should return `400 {"error":"chatJid is
+required"}` or another payload-validation error instead of `404`.
 
 ## Marker caveat
 

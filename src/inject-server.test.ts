@@ -93,6 +93,17 @@ describe('inject server', () => {
     expect(messages[0].content).toContain('<untrusted>From: a@example.com');
   });
 
+  it('returns 405 for wrong-method requests to existing inject routes', async () => {
+    const response = await fetch(`${baseUrl}/inject/email`);
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get('allow')).toBe('POST');
+    await expect(response.json()).resolves.toEqual({
+      error: 'method not allowed',
+      allowed: ['POST'],
+    });
+  });
+
   it('rejects email requests without wrapped content', async () => {
     const response = await fetch(`${baseUrl}/inject/email`, {
       method: 'POST',

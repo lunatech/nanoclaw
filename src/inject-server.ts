@@ -103,8 +103,16 @@ export function startInjectServer(opts: InjectServerOpts): http.Server {
       res.end(json);
     };
 
-    const isInject = req.method === 'POST' && req.url === '/inject';
-    const isEmailInject = req.method === 'POST' && req.url === '/inject/email';
+    const isInjectPath = req.url === '/inject';
+    const isEmailInjectPath = req.url === '/inject/email';
+    const isInject = req.method === 'POST' && isInjectPath;
+    const isEmailInject = req.method === 'POST' && isEmailInjectPath;
+
+    if ((isInjectPath || isEmailInjectPath) && req.method !== 'POST') {
+      res.setHeader('Allow', 'POST');
+      sendJson(405, { error: 'method not allowed', allowed: ['POST'] });
+      return;
+    }
 
     if (!isInject && !isEmailInject) {
       sendJson(404, { error: 'not found' });
