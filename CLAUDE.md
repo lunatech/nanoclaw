@@ -43,6 +43,9 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 
 Run commands directly—don't tell the user to run them.
 
+If `package.json` changes, run `npm audit --package-lock-only` and resolve or
+explicitly document any findings before considering the work complete.
+
 ```bash
 npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript

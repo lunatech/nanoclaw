@@ -13,6 +13,8 @@ and is not tracked in git.
 4. Append a log entry whenever the task is claimed, paused, handed off,
    changes branch, or materially changes scope.
 5. Use `WORKTREE` as `LAST_COMMIT` for uncommitted changes.
+6. Run `npm audit --package-lock-only` whenever `package.json` changes and
+   address or document the results before handing work off.
 
 ## Coordination Rules
 
