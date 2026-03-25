@@ -29,7 +29,12 @@ import {
 // --- Helpers ---
 
 function createMockProcess(pid = 12345) {
-  return { pid, unref: vi.fn(), kill: vi.fn() };
+  return {
+    pid,
+    unref: vi.fn(),
+    kill: vi.fn(),
+    stdin: { write: vi.fn(), end: vi.fn() },
+  };
 }
 
 describe('remote-control', () => {
@@ -37,7 +42,7 @@ describe('remote-control', () => {
   let readFileSyncSpy: ReturnType<typeof vi.spyOn>;
   let writeFileSyncSpy: ReturnType<typeof vi.spyOn>;
   let unlinkSyncSpy: ReturnType<typeof vi.spyOn>;
-  let mkdirSyncSpy: ReturnType<typeof vi.spyOn>;
+  let _mkdirSyncSpy: ReturnType<typeof vi.spyOn>;
   let openSyncSpy: ReturnType<typeof vi.spyOn>;
   let closeSyncSpy: ReturnType<typeof vi.spyOn>;
 
@@ -50,7 +55,7 @@ describe('remote-control', () => {
     stdoutFileContent = '';
 
     // Default fs mocks
-    mkdirSyncSpy = vi
+    _mkdirSyncSpy = vi
       .spyOn(fs, 'mkdirSync')
       .mockImplementation(() => undefined as any);
     writeFileSyncSpy = vi
@@ -113,8 +118,8 @@ describe('remote-control', () => {
 
       const spawnCall = spawnMock.mock.calls[0];
       const options = spawnCall[2];
-      // stdio should use file descriptors (numbers), not 'pipe'
-      expect(options.stdio[0]).toBe('ignore');
+      // stdio[0] is 'pipe' so we can write 'y' to accept the prompt
+      expect(options.stdio[0]).toBe('pipe');
       expect(typeof options.stdio[1]).toBe('number');
       expect(typeof options.stdio[2]).toBe('number');
     });

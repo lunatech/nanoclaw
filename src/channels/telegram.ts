@@ -1,8 +1,15 @@
-import { Bot } from 'grammy';
 import fs from 'fs';
+import https from 'https';
 import path from 'path';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN, GROUPS_DIR } from '../config.js';
+import { Api, Bot } from 'grammy';
+
+import {
+  ASSISTANT_NAME,
+  GROUPS_DIR,
+  TELEGRAM_BOT_TOKEN,
+  TRIGGER_PATTERN,
+} from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -17,7 +24,6 @@ const MEDIA_FILE_INITIAL_MODE = 0o600;
 const MEDIA_FILE_FINAL_MODE = 0o400;
 
 function sniffMimeType(buffer: Buffer): string | undefined {
-  // PDF
   if (
     buffer.length >= 4 &&
     buffer[0] === 0x25 &&
@@ -27,7 +33,6 @@ function sniffMimeType(buffer: Buffer): string | undefined {
   ) {
     return 'application/pdf';
   }
-  // PNG
   if (
     buffer.length >= 8 &&
     buffer[0] === 0x89 &&
@@ -41,7 +46,6 @@ function sniffMimeType(buffer: Buffer): string | undefined {
   ) {
     return 'image/png';
   }
-  // JPEG
   if (
     buffer.length >= 3 &&
     buffer[0] === 0xff &&
@@ -50,12 +54,10 @@ function sniffMimeType(buffer: Buffer): string | undefined {
   ) {
     return 'image/jpeg';
   }
-  // GIF
   if (buffer.length >= 6) {
     const header = buffer.subarray(0, 6).toString('ascii');
     if (header === 'GIF87a' || header === 'GIF89a') return 'image/gif';
   }
-  // WEBP
   if (
     buffer.length >= 12 &&
     buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
@@ -86,6 +88,23 @@ function extensionForMimeType(
   }
 }
 
+async function sendTelegramMessage(
+  api: { sendMessage: Api['sendMessage'] },
+  chatId: string | number,
+  text: string,
+  options: { message_thread_id?: number } = {},
+): Promise<void> {
+  try {
+    await api.sendMessage(chatId, text, {
+      ...options,
+      parse_mode: 'Markdown',
+    });
+  } catch (err) {
+    logger.debug({ err }, 'Markdown send failed, falling back to plain text');
+    await api.sendMessage(chatId, text, options);
+  }
+}
+
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -105,9 +124,12 @@ export class TelegramChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    this.bot = new Bot(this.botToken);
+    this.bot = new Bot(this.botToken, {
+      client: {
+        baseFetchConfig: { agent: https.globalAgent, compress: true },
+      },
+    });
 
-    // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
       const chatId = ctx.chat.id;
       const chatType = ctx.chat.type;
@@ -122,38 +144,32 @@ export class TelegramChannel implements Channel {
       );
     });
 
-    // Command to check bot status
     this.bot.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
+    const telegramBotCommands = new Set(['chatid', 'ping']);
+
     this.bot.on('message:text', async (ctx) => {
-      // Skip commands
-      if (ctx.message.text.startsWith('/')) return;
+      if (ctx.message.text.startsWith('/')) {
+        const cmd = ctx.message.text.slice(1).split(/[\s@]/)[0].toLowerCase();
+        if (telegramBotCommands.has(cmd)) return;
+      }
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
 
-      // Determine if message is from a real user or from the bot itself
       const senderId = ctx.from?.id.toString() || '';
       const botId = ctx.me?.id.toString() || '';
-
-      // CRITICAL: Check if message was sent by the bot itself
-      // Messages sent via API with bot token appear as bot messages
-      // We need to allow these for external integrations (iPhone Shortcuts, webhooks, etc.)
       const isFromBot = senderId === botId;
-
-      // For bot-sent messages, treat them as user messages if they contain specific patterns
-      // This allows external integrations to work while preventing bot loops
       const isExternalIntegration =
         isFromBot &&
-        (content.includes('📍') || // Location messages
-          content.includes('https://maps.google.com') || // Map links
-          content.match(/Lat(itude)?:/) || // Location coordinates
+        (content.includes('📍') ||
+          content.includes('https://maps.google.com') ||
+          content.match(/Lat(itude)?:/) ||
           content.match(/Long(itude)?:/));
 
-      // Skip messages from bot unless they're from external integrations
       if (isFromBot && !isExternalIntegration) {
         logger.debug({ chatJid, content }, 'Skipping bot self-message');
         return;
@@ -166,34 +182,26 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const sender = ctx.from?.id.toString() || '';
       const msgId = ctx.message.message_id.toString();
-
-      // Determine chat name
       const chatName =
         ctx.chat.type === 'private'
           ? senderName
           : (ctx.chat as any).title || chatJid;
 
-      // Translate Telegram @bot_username mentions into TRIGGER_PATTERN format.
-      // Telegram @mentions (e.g., @andy_ai_bot) won't match TRIGGER_PATTERN
-      // (e.g., ^@Andy\b), so we prepend the trigger when the bot is @mentioned.
       const botUsername = ctx.me?.username?.toLowerCase();
       if (botUsername) {
         const entities = ctx.message.entities || [];
         const isBotMentioned = entities.some((entity) => {
-          if (entity.type === 'mention') {
-            const mentionText = content
-              .substring(entity.offset, entity.offset + entity.length)
-              .toLowerCase();
-            return mentionText === `@${botUsername}`;
-          }
-          return false;
+          if (entity.type !== 'mention') return false;
+          const mentionText = content
+            .substring(entity.offset, entity.offset + entity.length)
+            .toLowerCase();
+          return mentionText === `@${botUsername}`;
         });
         if (isBotMentioned && !TRIGGER_PATTERN.test(content)) {
           content = `@${ASSISTANT_NAME} ${content}`;
         }
       }
 
-      // Store chat metadata for discovery
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
       this.opts.onChatMetadata(
@@ -204,7 +212,6 @@ export class TelegramChannel implements Channel {
         isGroup,
       );
 
-      // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
         logger.debug(
@@ -214,7 +221,6 @@ export class TelegramChannel implements Channel {
         return;
       }
 
-      // Deliver message — startMessageLoop() will pick it up
       this.opts.onMessage(chatJid, {
         id: msgId,
         chat_jid: chatJid,
@@ -232,7 +238,6 @@ export class TelegramChannel implements Channel {
       );
     });
 
-    // Handle non-text messages with placeholders so the agent knows something was sent
     const storeNonText = async (
       ctx: any,
       placeholder: string,
@@ -255,12 +260,10 @@ export class TelegramChannel implements Channel {
 
       if (downloadMedia) {
         try {
-          // Get file object (works for photo, document, video, etc.)
           let fileId: string | undefined;
           let isDocument = false;
 
           if (ctx.message.photo) {
-            // Photos come as array, get highest resolution
             const photos = ctx.message.photo;
             fileId = photos[photos.length - 1].file_id;
           } else if (ctx.message.document) {
@@ -271,19 +274,13 @@ export class TelegramChannel implements Channel {
           }
 
           if (fileId) {
-            // Download file from Telegram
             const file = await this.bot!.api.getFile(fileId);
             const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
-
-            // Fetch the file
             const response = await fetch(fileUrl);
             const arrayBuffer = await response.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
 
-            // Determine MIME type
             mediaMimeType = sniffMimeType(buffer);
-
-            // Fallback to Telegram's mime_type if available
             if (!mediaMimeType) {
               if (ctx.message.document?.mime_type) {
                 mediaMimeType = ctx.message.document.mime_type;
@@ -329,7 +326,7 @@ export class TelegramChannel implements Channel {
         chat_jid: chatJid,
         sender: ctx.from?.id?.toString() || '',
         sender_name: senderName,
-        content: mediaPath ? caption : `${placeholder}${caption}`,
+        content: mediaPath ? caption.trimStart() : `${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
         media_path: mediaPath,
@@ -352,7 +349,6 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
     this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
-    // Handle emoji reactions on messages
     this.bot.on('message_reaction', (ctx) => {
       const reaction = (ctx.update as any).message_reaction;
       if (!reaction) return;
@@ -368,8 +364,7 @@ export class TelegramChannel implements Channel {
         .filter((r) => r.type === 'emoji')
         .map((r) => r.emoji)
         .join('');
-
-      if (!newEmojis) return; // reaction removed, ignore
+      if (!newEmojis) return;
 
       const fromName =
         reaction.user?.first_name || reaction.user?.username || 'User';
@@ -393,12 +388,10 @@ export class TelegramChannel implements Channel {
       });
     });
 
-    // Handle errors gracefully
     this.bot.catch((err) => {
       logger.error({ err: err.message }, 'Telegram bot error');
     });
 
-    // Start polling — reject if startup fails instead of hanging forever
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const resolveOnce = () => {
@@ -441,16 +434,15 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
-
-      // Telegram has a 4096 character limit per message — split if needed
-      const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+      const maxLength = 4096;
+      if (text.length <= maxLength) {
+        await sendTelegramMessage(this.bot.api, numericId, text);
       } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await this.bot.api.sendMessage(
+        for (let i = 0; i < text.length; i += maxLength) {
+          await sendTelegramMessage(
+            this.bot.api,
             numericId,
-            text.slice(i, i + MAX_LENGTH),
+            text.slice(i, i + maxLength),
           );
         }
       }
@@ -506,7 +498,6 @@ export class TelegramChannel implements Channel {
 }
 
 registerChannel('telegram', (opts) => {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return null;
-  return new TelegramChannel(token, opts);
+  if (!TELEGRAM_BOT_TOKEN) return null;
+  return new TelegramChannel(TELEGRAM_BOT_TOKEN, opts);
 });

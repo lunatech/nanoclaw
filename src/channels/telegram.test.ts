@@ -2,9 +2,13 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // --- Mocks ---
 
+// Mock registry (registerChannel runs at import time)
+vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
+  GROUPS_DIR: '/tmp/nanoclaw-groups',
+  TELEGRAM_BOT_TOKEN: 'test-token',
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
 
@@ -32,8 +36,10 @@ vi.mock('grammy', () => ({
     errorHandler: Handler | null = null;
 
     api = {
+      getFile: vi.fn(),
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      setMessageReaction: vi.fn().mockResolvedValue(undefined),
     };
 
     constructor(token: string) {
@@ -57,6 +63,7 @@ vi.mock('grammy', () => ({
 
     start(opts: { onStart: (botInfo: any) => void }) {
       opts.onStart({ username: 'andy_ai_bot', id: 12345 });
+      return Promise.resolve();
     }
 
     stop() {}
@@ -289,16 +296,28 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('skips command messages (starting with /)', async () => {
+    it('skips bot commands (/chatid, /ping) but passes other / messages through', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      const ctx = createTextCtx({ text: '/start' });
-      await triggerTextMessage(ctx);
-
+      const ctx1 = createTextCtx({ text: '/chatid' });
+      await triggerTextMessage(ctx1);
       expect(opts.onMessage).not.toHaveBeenCalled();
       expect(opts.onChatMetadata).not.toHaveBeenCalled();
+
+      const ctx2 = createTextCtx({ text: '/ping' });
+      await triggerTextMessage(ctx2);
+      expect(opts.onMessage).not.toHaveBeenCalled();
+
+      // Non-bot /commands should flow through
+      const ctx3 = createTextCtx({ text: '/remote-control' });
+      await triggerTextMessage(ctx3);
+      expect(opts.onMessage).toHaveBeenCalledTimes(1);
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '/remote-control' }),
+      );
     });
 
     it('extracts sender name from first_name', async () => {
@@ -704,6 +723,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
         'Hello',
+        { parse_mode: 'Markdown' },
       );
     });
 
@@ -717,6 +737,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '-1001234567890',
         'Group message',
+        { parse_mode: 'Markdown' },
       );
     });
 
@@ -733,11 +754,13 @@ describe('TelegramChannel', () => {
         1,
         '100200300',
         'x'.repeat(4096),
+        { parse_mode: 'Markdown' },
       );
       expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
         2,
         '100200300',
         'x'.repeat(904),
+        { parse_mode: 'Markdown' },
       );
     });
 

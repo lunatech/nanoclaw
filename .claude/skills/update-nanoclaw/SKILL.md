@@ -233,3 +233,4 @@ Tell the user:
 - Restart the service to apply changes:
   - If using launchd: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
   - If running manually: restart `npm run dev`
+
