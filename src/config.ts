@@ -8,6 +8,12 @@ import { isValidTimezone } from './timezone.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
+  'INJECT_SECRET',
+  'INJECT_HOST',
+  'INJECT_PORT',
+  'CREDENTIAL_PROXY_PORT',
   'ONECLI_URL',
   'TZ',
 ]);
@@ -40,6 +46,7 @@ export const SENDER_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
@@ -51,6 +58,10 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || envConfig.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
 export const ONECLI_URL =
   process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
 export const IPC_POLL_INTERVAL = 1000;
@@ -83,3 +94,23 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// Inject endpoint configuration
+// INJECT_SECRET: required bearer token; if unset the inject server won't start
+// INJECT_HOST: bind address — set to your Tailscale IP (100.x.x.x) so only
+//              Tailscale peers can reach it (defaults to loopback/dev only)
+// INJECT_PORT: TCP port (default 3721)
+export const INJECT_SECRET =
+  process.env.INJECT_SECRET || envConfig.INJECT_SECRET || '';
+export const INJECT_HOST =
+  process.env.INJECT_HOST || envConfig.INJECT_HOST || '127.0.0.1';
+export const INJECT_PORT = parseInt(
+  process.env.INJECT_PORT || envConfig.INJECT_PORT || '3721',
+  10,
+);
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY =
+  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';

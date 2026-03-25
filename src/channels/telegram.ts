@@ -1,28 +1,93 @@
+import fs from 'fs';
 import https from 'https';
+import path from 'path';
+
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-import { readEnvFile } from '../env.js';
+import {
+  ASSISTANT_NAME,
+  GROUPS_DIR,
+  TELEGRAM_BOT_TOKEN,
+  TRIGGER_PATTERN,
+} from '../config.js';
 import { logger } from '../logger.js';
-import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+import { registerChannel } from './registry.js';
 
-export interface TelegramChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
+const MEDIA_DIR_MODE = 0o700;
+const MEDIA_FILE_INITIAL_MODE = 0o600;
+const MEDIA_FILE_FINAL_MODE = 0o400;
+
+function sniffMimeType(buffer: Buffer): string | undefined {
+  if (
+    buffer.length >= 4 &&
+    buffer[0] === 0x25 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x44 &&
+    buffer[3] === 0x46
+  ) {
+    return 'application/pdf';
+  }
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  if (
+    buffer.length >= 3 &&
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return 'image/jpeg';
+  }
+  if (buffer.length >= 6) {
+    const header = buffer.subarray(0, 6).toString('ascii');
+    if (header === 'GIF87a' || header === 'GIF89a') return 'image/gif';
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return undefined;
 }
 
-/**
- * Send a message with Telegram Markdown parse mode, falling back to plain text.
- * Claude's output naturally matches Telegram's Markdown v1 format:
- *   *bold*, _italic_, `code`, ```code blocks```, [links](url)
- */
+function extensionForMimeType(
+  mimeType: string | undefined,
+  isDocument: boolean,
+): string {
+  switch (mimeType) {
+    case 'application/pdf':
+      return 'pdf';
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/png':
+      return 'png';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    default:
+      return isDocument ? 'bin' : 'jpg';
+  }
+}
+
 async function sendTelegramMessage(
   api: { sendMessage: Api['sendMessage'] },
   chatId: string | number,
@@ -35,10 +100,15 @@ async function sendTelegramMessage(
       parse_mode: 'Markdown',
     });
   } catch (err) {
-    // Fallback: send as plain text if Markdown parsing fails
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
     await api.sendMessage(chatId, text, options);
   }
+}
+
+export interface TelegramChannelOpts {
+  onMessage: OnInboundMessage;
+  onChatMetadata: OnChatMetadata;
+  registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
 export class TelegramChannel implements Channel {
@@ -60,7 +130,6 @@ export class TelegramChannel implements Channel {
       },
     });
 
-    // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
       const chatId = ctx.chat.id;
       const chatType = ctx.chat.type;
@@ -75,24 +144,37 @@ export class TelegramChannel implements Channel {
       );
     });
 
-    // Command to check bot status
     this.bot.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
-    // Telegram bot commands handled above — skip them in the general handler
-    // so they don't also get stored as messages. All other /commands flow through.
-    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping']);
+    const telegramBotCommands = new Set(['chatid', 'ping']);
 
     this.bot.on('message:text', async (ctx) => {
       if (ctx.message.text.startsWith('/')) {
         const cmd = ctx.message.text.slice(1).split(/[\s@]/)[0].toLowerCase();
-        if (TELEGRAM_BOT_COMMANDS.has(cmd)) return;
+        if (telegramBotCommands.has(cmd)) return;
       }
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
+
+      const senderId = ctx.from?.id.toString() || '';
+      const botId = ctx.me?.id.toString() || '';
+      const isFromBot = senderId === botId;
+      const isExternalIntegration =
+        isFromBot &&
+        (content.includes('📍') ||
+          content.includes('https://maps.google.com') ||
+          content.match(/Lat(itude)?:/) ||
+          content.match(/Long(itude)?:/));
+
+      if (isFromBot && !isExternalIntegration) {
+        logger.debug({ chatJid, content }, 'Skipping bot self-message');
+        return;
+      }
+
       const senderName =
         ctx.from?.first_name ||
         ctx.from?.username ||
@@ -100,34 +182,26 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const sender = ctx.from?.id.toString() || '';
       const msgId = ctx.message.message_id.toString();
-
-      // Determine chat name
       const chatName =
         ctx.chat.type === 'private'
           ? senderName
           : (ctx.chat as any).title || chatJid;
 
-      // Translate Telegram @bot_username mentions into TRIGGER_PATTERN format.
-      // Telegram @mentions (e.g., @andy_ai_bot) won't match TRIGGER_PATTERN
-      // (e.g., ^@Andy\b), so we prepend the trigger when the bot is @mentioned.
       const botUsername = ctx.me?.username?.toLowerCase();
       if (botUsername) {
         const entities = ctx.message.entities || [];
         const isBotMentioned = entities.some((entity) => {
-          if (entity.type === 'mention') {
-            const mentionText = content
-              .substring(entity.offset, entity.offset + entity.length)
-              .toLowerCase();
-            return mentionText === `@${botUsername}`;
-          }
-          return false;
+          if (entity.type !== 'mention') return false;
+          const mentionText = content
+            .substring(entity.offset, entity.offset + entity.length)
+            .toLowerCase();
+          return mentionText === `@${botUsername}`;
         });
         if (isBotMentioned && !TRIGGER_PATTERN.test(content)) {
           content = `@${ASSISTANT_NAME} ${content}`;
         }
       }
 
-      // Store chat metadata for discovery
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
       this.opts.onChatMetadata(
@@ -138,7 +212,6 @@ export class TelegramChannel implements Channel {
         isGroup,
       );
 
-      // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
         logger.debug(
@@ -148,7 +221,6 @@ export class TelegramChannel implements Channel {
         return;
       }
 
-      // Deliver message — startMessageLoop() will pick it up
       this.opts.onMessage(chatJid, {
         id: msgId,
         chat_jid: chatJid,
@@ -157,6 +229,7 @@ export class TelegramChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        replyTo: ctx.message.reply_to_message?.text,
       });
 
       logger.info(
@@ -165,8 +238,11 @@ export class TelegramChannel implements Channel {
       );
     });
 
-    // Handle non-text messages with placeholders so the agent knows something was sent
-    const storeNonText = (ctx: any, placeholder: string) => {
+    const storeNonText = async (
+      ctx: any,
+      placeholder: string,
+      downloadMedia = false,
+    ) => {
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -178,6 +254,63 @@ export class TelegramChannel implements Channel {
         ctx.from?.id?.toString() ||
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+
+      let mediaPath: string | undefined;
+      let mediaMimeType: string | undefined;
+
+      if (downloadMedia) {
+        try {
+          let fileId: string | undefined;
+          let isDocument = false;
+
+          if (ctx.message.photo) {
+            const photos = ctx.message.photo;
+            fileId = photos[photos.length - 1].file_id;
+          } else if (ctx.message.document) {
+            fileId = ctx.message.document.file_id;
+            isDocument = true;
+          } else if (ctx.message.video) {
+            fileId = ctx.message.video.file_id;
+          }
+
+          if (fileId) {
+            const file = await this.bot!.api.getFile(fileId);
+            const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+            const response = await fetch(fileUrl);
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+
+            mediaMimeType = sniffMimeType(buffer);
+            if (!mediaMimeType) {
+              if (ctx.message.document?.mime_type) {
+                mediaMimeType = ctx.message.document.mime_type;
+              } else if (ctx.message.photo) {
+                mediaMimeType = 'image/jpeg';
+              }
+            }
+
+            const ext = extensionForMimeType(mediaMimeType, isDocument);
+            const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
+            fs.mkdirSync(mediaDir, { recursive: true, mode: MEDIA_DIR_MODE });
+            fs.chmodSync(mediaDir, MEDIA_DIR_MODE);
+
+            const filename = `${ctx.message.message_id || Date.now()}.${ext}`;
+            const fullPath = path.join(mediaDir, filename);
+            fs.writeFileSync(fullPath, buffer, {
+              mode: MEDIA_FILE_INITIAL_MODE,
+            });
+            fs.chmodSync(fullPath, MEDIA_FILE_FINAL_MODE);
+            mediaPath = `media/${filename}`;
+
+            logger.info(
+              { chatJid, filename, mimeType: mediaMimeType },
+              'Telegram media downloaded',
+            );
+          }
+        } catch (err) {
+          logger.warn({ err }, 'Failed to download Telegram media');
+        }
+      }
 
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
@@ -193,19 +326,21 @@ export class TelegramChannel implements Channel {
         chat_jid: chatJid,
         sender: ctx.from?.id?.toString() || '',
         sender_name: senderName,
-        content: `${placeholder}${caption}`,
+        content: mediaPath ? caption.trimStart() : `${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
+        media_path: mediaPath,
+        media_mime_type: mediaMimeType,
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]', true));
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+      storeNonText(ctx, `[Document: ${name}]`, true);
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
@@ -214,26 +349,82 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
     this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
-    // Handle errors gracefully
+    this.bot.on('message_reaction', (ctx) => {
+      const reaction = (ctx.update as any).message_reaction;
+      if (!reaction) return;
+
+      const chatId = reaction.chat?.id;
+      if (!chatId) return;
+
+      const jid = `tg:${chatId}`;
+      const group = this.opts.registeredGroups()[jid];
+      if (!group) return;
+
+      const newEmojis = (reaction.new_reaction as any[])
+        .filter((r) => r.type === 'emoji')
+        .map((r) => r.emoji)
+        .join('');
+      if (!newEmojis) return;
+
+      const fromName =
+        reaction.user?.first_name || reaction.user?.username || 'User';
+      const timestamp = new Date().toISOString();
+
+      this.opts.onMessage(jid, {
+        id: `reaction-${reaction.message_id}-${Date.now()}`,
+        chat_jid: jid,
+        sender: reaction.user?.id?.toString() ?? 'unknown',
+        sender_name: fromName,
+        content: JSON.stringify({
+          _type: 'message_reaction',
+          emoji: newEmojis,
+          message_id: reaction.message_id,
+          from_name: fromName,
+          text: `[reaction: ${newEmojis}] on message #${reaction.message_id}`,
+        }),
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+      });
+    });
+
     this.bot.catch((err) => {
       logger.error({ err: err.message }, 'Telegram bot error');
     });
 
-    // Start polling — returns a Promise that resolves when started
-    return new Promise<void>((resolve) => {
-      this.bot!.start({
-        onStart: (botInfo) => {
-          logger.info(
-            { username: botInfo.username, id: botInfo.id },
-            'Telegram bot connected',
-          );
-          console.log(`\n  Telegram bot: @${botInfo.username}`);
-          console.log(
-            `  Send /chatid to the bot to get a chat's registration ID\n`,
-          );
-          resolve();
-        },
-      });
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const rejectOnce = (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+
+      try {
+        void this.bot!
+          .start({
+            allowed_updates: ['message', 'callback_query', 'message_reaction'],
+            onStart: (botInfo) => {
+              logger.info(
+                { username: botInfo.username, id: botInfo.id },
+                'Telegram bot connected',
+              );
+              console.log(`\n  Telegram bot: @${botInfo.username}`);
+              console.log(
+                `  Send /chatid to the bot to get a chat's registration ID\n`,
+              );
+              resolveOnce();
+            },
+          })
+          .catch(rejectOnce);
+      } catch (err) {
+        rejectOnce(err);
+      }
     });
   }
 
@@ -245,17 +436,15 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
-
-      // Telegram has a 4096 character limit per message — split if needed
-      const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
+      const maxLength = 4096;
+      if (text.length <= maxLength) {
         await sendTelegramMessage(this.bot.api, numericId, text);
       } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        for (let i = 0; i < text.length; i += maxLength) {
           await sendTelegramMessage(
             this.bot.api,
             numericId,
-            text.slice(i, i + MAX_LENGTH),
+            text.slice(i, i + maxLength),
           );
         }
       }
@@ -290,15 +479,27 @@ export class TelegramChannel implements Channel {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
   }
+
+  async setReaction(
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void> {
+    if (!this.bot) return;
+    try {
+      const numericChatId = jid.replace(/^tg:/, '');
+      const numericMsgId = parseInt(messageId, 10);
+      if (isNaN(numericMsgId)) return;
+      await this.bot.api.setMessageReaction(numericChatId, numericMsgId, [
+        { type: 'emoji', emoji } as { type: 'emoji'; emoji: any },
+      ]);
+    } catch (err) {
+      logger.debug({ jid, messageId, emoji, err }, 'Failed to set reaction');
+    }
+  }
 }
 
-registerChannel('telegram', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
-  const token =
-    process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
-  if (!token) {
-    logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
-    return null;
-  }
-  return new TelegramChannel(token, opts);
+registerChannel('telegram', (opts) => {
+  if (!TELEGRAM_BOT_TOKEN) return null;
+  return new TelegramChannel(TELEGRAM_BOT_TOKEN, opts);
 });

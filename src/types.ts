@@ -51,6 +51,14 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  media_path?: string;
+  media_mime_type?: string;
+  replyTo?: string; // text of the message being replied to, if any
+}
+
+export interface ClaudeAttachment {
+  path: string;
+  mimeType: string;
 }
 
 export interface ScheduledTask {
@@ -88,6 +96,8 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: set an emoji reaction on a message.
+  setReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
 }

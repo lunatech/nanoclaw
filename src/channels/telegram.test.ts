@@ -4,13 +4,11 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // Mock registry (registerChannel runs at import time)
 vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
-
-// Mock env reader (used by the factory, not needed in unit tests)
-vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
-
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
+  GROUPS_DIR: '/tmp/nanoclaw-groups',
+  TELEGRAM_BOT_TOKEN: 'test-token',
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
 
@@ -38,8 +36,10 @@ vi.mock('grammy', () => ({
     errorHandler: Handler | null = null;
 
     api = {
+      getFile: vi.fn(),
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      setMessageReaction: vi.fn().mockResolvedValue(undefined),
     };
 
     constructor(token: string) {
@@ -63,6 +63,7 @@ vi.mock('grammy', () => ({
 
     start(opts: { onStart: (botInfo: any) => void }) {
       opts.onStart({ username: 'andy_ai_bot', id: 12345 });
+      return Promise.resolve();
     }
 
     stop() {}
@@ -122,7 +123,7 @@ function createTextCtx(overrides: {
       message_id: overrides.messageId ?? 1,
       entities: overrides.entities ?? [],
     },
-    me: { username: 'andy_ai_bot' },
+    me: { username: 'andy_ai_bot', id: 12345 },
     reply: vi.fn(),
   };
 }
@@ -300,7 +301,6 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      // Bot commands should be skipped
       const ctx1 = createTextCtx({ text: '/chatid' });
       await triggerTextMessage(ctx1);
       expect(opts.onMessage).not.toHaveBeenCalled();

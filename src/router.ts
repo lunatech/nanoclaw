@@ -1,5 +1,6 @@
-import { Channel, NewMessage } from './types.js';
+import { Channel, ClaudeAttachment, NewMessage } from './types.js';
 import { formatLocalTime } from './timezone.js';
+import { tryParseSingleUntrustedBlock } from './untrusted-content.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -12,16 +13,85 @@ export function escapeXml(s: string): string {
 
 export function formatMessages(
   messages: NewMessage[],
-  timezone: string,
+  timezone?: string,
 ): string {
   const lines = messages.map((m) => {
-    const displayTime = formatLocalTime(m.timestamp, timezone);
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+    let body = formatPromptContent(m.content);
+    if (m.media_path) {
+      body += `\n[Media attached — use Read tool to view: /workspace/group/${m.media_path}]`;
+    }
+    const displayTime = timezone
+      ? formatLocalTime(m.timestamp, timezone)
+      : m.timestamp;
+    const replyPrefix = m.replyTo
+      ? `[In reply to: "${escapeXml(m.replyTo)}"]\n`
+      : '';
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${replyPrefix}${body}</message>`;
   });
-
-  const header = `<context timezone="${escapeXml(timezone)}" />\n`;
-
+  const header = timezone
+    ? `<context timezone="${escapeXml(timezone)}" />\n`
+    : '';
   return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
+}
+
+function formatPromptContent(content: string): string {
+  const parsed = tryParseSingleUntrustedBlock(content);
+  if (!parsed) return escapeXml(content);
+
+  const segments: string[] = [];
+  if (parsed.before) {
+    segments.push(escapeXml(parsed.before));
+  }
+  segments.push('[UNTRUSTED EMAIL BEGIN]');
+  segments.push(escapeXml(parsed.content));
+  segments.push('[UNTRUSTED EMAIL END]');
+  if (parsed.after) {
+    segments.push(escapeXml(parsed.after));
+  }
+  return segments.join('\n');
+}
+
+const CLAUDE_SUPPORTED_ATTACHMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+function normalizeMimeType(mimeType?: string): string | null {
+  if (!mimeType) return null;
+  const normalized = mimeType.trim().toLowerCase().split(';', 1)[0];
+  return normalized || null;
+}
+
+function guessMimeTypeFromPath(filePath: string): string | null {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.pdf')) return 'application/pdf';
+  return null;
+}
+
+export function getClaudeAttachments(
+  messages: NewMessage[],
+): ClaudeAttachment[] {
+  const attachments: ClaudeAttachment[] = [];
+  for (const message of messages) {
+    if (!message.media_path) continue;
+    const mimeType =
+      normalizeMimeType(message.media_mime_type) ||
+      guessMimeTypeFromPath(message.media_path);
+    if (!mimeType || !CLAUDE_SUPPORTED_ATTACHMENT_MIME_TYPES.has(mimeType))
+      continue;
+    attachments.push({
+      path: `/workspace/group/${message.media_path}`,
+      mimeType,
+    });
+  }
+  return attachments;
 }
 
 export function stripInternalTags(text: string): string {

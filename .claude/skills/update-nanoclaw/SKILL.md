@@ -234,7 +234,3 @@ Tell the user:
   - If using launchd: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
   - If running manually: restart `npm run dev`
 
-
-## Diagnostics
-
-Send diagnostics data by following `.claude/skills/update-nanoclaw/diagnostics.md`.

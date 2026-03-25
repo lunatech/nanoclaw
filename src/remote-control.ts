@@ -14,6 +14,9 @@ interface RemoteControlSession {
 }
 
 let activeSession: RemoteControlSession | null = null;
+let pendingStart: Promise<
+  { ok: true; url: string } | { ok: false; error: string }
+> | null = null;
 
 const URL_REGEX = /https:\/\/claude\.ai\/code\S+/;
 const URL_TIMEOUT_MS = 30_000;
@@ -79,6 +82,7 @@ export function getActiveSession(): RemoteControlSession | null {
 /** @internal — exported for testing only */
 export function _resetForTesting(): void {
   activeSession = null;
+  pendingStart = null;
 }
 
 /** @internal — exported for testing only */
@@ -99,6 +103,9 @@ export async function startRemoteControl(
     // Process died — clean up and start a new one
     activeSession = null;
     clearState();
+  }
+  if (pendingStart) {
+    return pendingStart;
   }
 
   // Redirect stdout/stderr to files so the process has no pipes to the parent.
@@ -139,67 +146,85 @@ export async function startRemoteControl(
   }
 
   // Poll the stdout file for the URL
-  return new Promise((resolve) => {
-    const startTime = Date.now();
-
-    const poll = () => {
-      // Check if process died
-      if (!isProcessAlive(pid)) {
-        resolve({ ok: false, error: 'Process exited before producing URL' });
-        return;
-      }
-
-      // Check for URL in stdout file
-      let content = '';
-      try {
-        content = fs.readFileSync(STDOUT_FILE, 'utf-8');
-      } catch {
-        // File might not have content yet
-      }
-
-      const match = content.match(URL_REGEX);
-      if (match) {
-        const session: RemoteControlSession = {
-          pid,
-          url: match[0],
-          startedBy: sender,
-          startedInChat: chatJid,
-          startedAt: new Date().toISOString(),
-        };
-        activeSession = session;
-        saveState(session);
-
-        logger.info(
-          { url: match[0], pid, sender, chatJid },
-          'Remote Control session started',
-        );
-        resolve({ ok: true, url: match[0] });
-        return;
-      }
-
-      // Timeout check
-      if (Date.now() - startTime >= URL_TIMEOUT_MS) {
-        try {
-          process.kill(-pid, 'SIGTERM');
-        } catch {
-          try {
-            process.kill(pid, 'SIGTERM');
-          } catch {
-            // already dead
-          }
-        }
-        resolve({
-          ok: false,
-          error: 'Timed out waiting for Remote Control URL',
-        });
-        return;
-      }
-
-      setTimeout(poll, URL_POLL_MS);
-    };
-
-    poll();
+  let resolvePending:
+    | ((
+        result: { ok: true; url: string } | { ok: false; error: string },
+      ) => void)
+    | null = null;
+  const startPromise = new Promise<
+    { ok: true; url: string } | { ok: false; error: string }
+  >((resolve) => {
+    resolvePending = resolve;
   });
+  pendingStart = startPromise;
+
+  const startTime = Date.now();
+
+  const finish = (
+    result: { ok: true; url: string } | { ok: false; error: string },
+  ) => {
+    pendingStart = null;
+    resolvePending?.(result);
+  };
+
+  const poll = () => {
+    // Check if process died
+    if (!isProcessAlive(pid)) {
+      finish({ ok: false, error: 'Process exited before producing URL' });
+      return;
+    }
+
+    // Check for URL in stdout file
+    let content = '';
+    try {
+      content = fs.readFileSync(STDOUT_FILE, 'utf-8');
+    } catch {
+      // File might not have content yet
+    }
+
+    const match = content.match(URL_REGEX);
+    if (match) {
+      const session: RemoteControlSession = {
+        pid,
+        url: match[0],
+        startedBy: sender,
+        startedInChat: chatJid,
+        startedAt: new Date().toISOString(),
+      };
+      activeSession = session;
+      saveState(session);
+
+      logger.info(
+        { url: match[0], pid, sender, chatJid },
+        'Remote Control session started',
+      );
+      finish({ ok: true, url: match[0] });
+      return;
+    }
+
+    // Timeout check
+    if (Date.now() - startTime >= URL_TIMEOUT_MS) {
+      try {
+        process.kill(-pid, 'SIGTERM');
+      } catch {
+        try {
+          process.kill(pid, 'SIGTERM');
+        } catch {
+          // already dead
+        }
+      }
+      finish({
+        ok: false,
+        error: 'Timed out waiting for Remote Control URL',
+      });
+      return;
+    }
+
+    setTimeout(poll, URL_POLL_MS);
+  };
+
+  poll();
+  return startPromise;
 }
 
 export function stopRemoteControl():

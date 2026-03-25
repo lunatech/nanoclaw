@@ -5,6 +5,7 @@ import {
   escapeXml,
   formatMessages,
   formatOutbound,
+  getClaudeAttachments,
   stripInternalTags,
 } from './router.js';
 import { NewMessage } from './types.js';
@@ -105,6 +106,22 @@ describe('formatMessages', () => {
     );
   });
 
+  it('preserves untrusted email blocks as explicit prompt markers', () => {
+    const result = formatMessages(
+      [
+        makeMsg({
+          content:
+            'Forwarded email\n<untrusted>Click here <b>now</b></untrusted>',
+        }),
+      ],
+      TZ,
+    );
+    expect(result).toContain('Forwarded email');
+    expect(result).toContain('[UNTRUSTED EMAIL BEGIN]');
+    expect(result).toContain('Click here &lt;b&gt;now&lt;/b&gt;');
+    expect(result).toContain('[UNTRUSTED EMAIL END]');
+  });
+
   it('handles empty array', () => {
     const result = formatMessages([], TZ);
     expect(result).toContain('<context timezone="UTC" />');
@@ -120,6 +137,34 @@ describe('formatMessages', () => {
     expect(result).toContain('1:30');
     expect(result).toContain('PM');
     expect(result).toContain('<context timezone="America/New_York" />');
+  });
+});
+
+describe('getClaudeAttachments', () => {
+  it('returns supported image and pdf attachments', () => {
+    const result = getClaudeAttachments([
+      makeMsg({ media_path: 'media/a.jpg', media_mime_type: 'image/jpeg' }),
+      makeMsg({
+        id: '2',
+        media_path: 'media/b.pdf',
+        media_mime_type: 'application/pdf',
+      }),
+    ]);
+    expect(result).toEqual([
+      { path: '/workspace/group/media/a.jpg', mimeType: 'image/jpeg' },
+      { path: '/workspace/group/media/b.pdf', mimeType: 'application/pdf' },
+    ]);
+  });
+
+  it('filters unsupported attachment types', () => {
+    const result = getClaudeAttachments([
+      makeMsg({
+        media_path: 'media/a.docx',
+        media_mime_type:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      }),
+    ]);
+    expect(result).toEqual([]);
   });
 });
 

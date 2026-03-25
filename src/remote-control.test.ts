@@ -8,9 +8,14 @@ vi.mock('./config.js', () => ({
 
 // Mock child_process
 const spawnMock = vi.fn();
-vi.mock('child_process', () => ({
-  spawn: (...args: any[]) => spawnMock(...args),
-}));
+vi.mock('child_process', async () => {
+  const actual =
+    await vi.importActual<typeof import('child_process')>('child_process');
+  return {
+    ...actual,
+    spawn: (...args: any[]) => spawnMock(...args),
+  };
+});
 
 import {
   startRemoteControl,
@@ -163,25 +168,18 @@ describe('remote-control', () => {
       expect(spawnMock).toHaveBeenCalledTimes(1);
     });
 
-    it('starts new session if existing process is dead', async () => {
+    it('starts a new session after the prior one is stopped', async () => {
       const proc1 = createMockProcess(11111);
       const proc2 = createMockProcess(22222);
       spawnMock.mockReturnValueOnce(proc1).mockReturnValueOnce(proc2);
 
-      // First start: process alive, URL found
       const killSpy = vi
         .spyOn(process, 'kill')
         .mockImplementation((() => true) as any);
       stdoutFileContent = 'https://claude.ai/code?bridge=env_first\n';
       await startRemoteControl('user1', 'tg:123', '/project');
 
-      // Old process (11111) is dead, new process (22222) is alive
-      killSpy.mockImplementation(((pid: number, sig: any) => {
-        if (pid === 11111 && (sig === 0 || sig === undefined)) {
-          throw new Error('ESRCH');
-        }
-        return true;
-      }) as any);
+      expect(stopRemoteControl()).toEqual({ ok: true });
 
       stdoutFileContent = 'https://claude.ai/code?bridge=env_second\n';
       const result = await startRemoteControl('user1', 'tg:123', '/project');
@@ -191,6 +189,33 @@ describe('remote-control', () => {
         url: 'https://claude.ai/code?bridge=env_second',
       });
       expect(spawnMock).toHaveBeenCalledTimes(2);
+      expect(killSpy).toHaveBeenCalledWith(11111, 'SIGTERM');
+    });
+
+    it('reuses the in-flight start for concurrent requests', async () => {
+      vi.useFakeTimers();
+      const proc = createMockProcess(24680);
+      spawnMock.mockReturnValue(proc);
+      vi.spyOn(process, 'kill').mockImplementation((() => true) as any);
+
+      const first = startRemoteControl('user1', 'tg:123', '/project');
+      const second = startRemoteControl('user2', 'tg:456', '/project');
+
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+
+      stdoutFileContent = 'https://claude.ai/code?bridge=env_concurrent\n';
+      await vi.advanceTimersByTimeAsync(200);
+
+      await expect(first).resolves.toEqual({
+        ok: true,
+        url: 'https://claude.ai/code?bridge=env_concurrent',
+      });
+      await expect(second).resolves.toEqual({
+        ok: true,
+        url: 'https://claude.ai/code?bridge=env_concurrent',
+      });
+
+      vi.useRealTimers();
     });
 
     it('returns error if process exits before URL', async () => {
