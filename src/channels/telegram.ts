@@ -406,22 +406,20 @@ export class TelegramChannel implements Channel {
       };
 
       try {
-        void this.bot!
-          .start({
-            allowed_updates: ['message', 'callback_query', 'message_reaction'],
-            onStart: (botInfo) => {
-              logger.info(
-                { username: botInfo.username, id: botInfo.id },
-                'Telegram bot connected',
-              );
-              console.log(`\n  Telegram bot: @${botInfo.username}`);
-              console.log(
-                `  Send /chatid to the bot to get a chat's registration ID\n`,
-              );
-              resolveOnce();
-            },
-          })
-          .catch(rejectOnce);
+        void this.bot!.start({
+          allowed_updates: ['message', 'callback_query', 'message_reaction'],
+          onStart: (botInfo) => {
+            logger.info(
+              { username: botInfo.username, id: botInfo.id },
+              'Telegram bot connected',
+            );
+            console.log(`\n  Telegram bot: @${botInfo.username}`);
+            console.log(
+              `  Send /chatid to the bot to get a chat's registration ID\n`,
+            );
+            resolveOnce();
+          },
+        }).catch(rejectOnce);
       } catch (err) {
         rejectOnce(err);
       }
