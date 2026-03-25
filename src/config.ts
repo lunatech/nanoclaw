@@ -5,6 +5,8 @@ import { readEnvFile } from './env.js';
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
+// Secrets (API keys, tokens) are NOT read here — they are loaded only
+// by the credential proxy (credential-proxy.ts), never exposed to containers.
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
@@ -14,7 +16,6 @@ const envConfig = readEnvFile([
   'INJECT_HOST',
   'INJECT_PORT',
   'CREDENTIAL_PROXY_PORT',
-  'ONECLI_URL',
   'TZ',
 ]);
 
@@ -64,8 +65,6 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
     '3001',
   10,
 );
-export const ONECLI_URL =
-  process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
