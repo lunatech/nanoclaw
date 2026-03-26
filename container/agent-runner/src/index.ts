@@ -663,7 +663,10 @@ async function main(): Promise<void> {
 
     // Script says wake agent — enrich prompt with script data
     log(`Script wakeAgent=true, enriching prompt with data`);
-    prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
+    prompt = {
+      text: `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`,
+      attachments: prompt.attachments,
+    };
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
