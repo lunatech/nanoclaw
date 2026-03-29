@@ -17,10 +17,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
-import {
-  startCustomServices,
-  stopCustomServices,
-} from './custom/index.js';
+import { startCustomServices, stopCustomServices } from './custom/index.js';
 import './channels/index.js';
 import {
   getChannelFactory,

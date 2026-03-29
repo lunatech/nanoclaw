@@ -20,9 +20,7 @@ export const forkConfig = {
     3001,
   ),
   onecliUrl:
-    process.env.ONECLI_URL ||
-    envConfig.ONECLI_URL ||
-    'http://localhost:10254',
+    process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254',
   maxMessagesPerPrompt: parsePositiveInt(
     process.env.MAX_MESSAGES_PER_PROMPT || envConfig.MAX_MESSAGES_PER_PROMPT,
     10,
