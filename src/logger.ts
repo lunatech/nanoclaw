@@ -15,6 +15,9 @@ const FULL_RESET = '\x1b[0m';
 
 const threshold =
   LEVELS[(process.env.LOG_LEVEL as Level) || 'info'] ?? LEVELS.info;
+const currentLevel = Object.entries(LEVELS).find(
+  ([, value]) => value === threshold,
+)?.[0] as Level | undefined;
 
 function formatErr(err: unknown): string {
   if (err instanceof Error) {
@@ -42,7 +45,7 @@ function ts(): string {
 
 function log(
   level: Level,
-  dataOrMsg: Record<string, unknown> | string,
+  dataOrMsg: unknown,
   msg?: string,
 ): void {
   if (LEVELS[level] < threshold) return;
@@ -52,25 +55,66 @@ function log(
     stream.write(
       `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${dataOrMsg}${RESET}\n`,
     );
+  } else if (dataOrMsg && typeof dataOrMsg === 'object') {
+    stream.write(
+      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg as Record<string, unknown>)}\n`,
+    );
   } else {
     stream.write(
-      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg}${RESET}${formatData(dataOrMsg)}\n`,
+      `[${ts()}] ${tag} (${process.pid}): ${MSG_COLOR}${msg ?? ''}${RESET} ${JSON.stringify(dataOrMsg)}\n`,
     );
   }
 }
 
-export const logger = {
-  debug: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('debug', dataOrMsg, msg),
-  info: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('info', dataOrMsg, msg),
-  warn: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('warn', dataOrMsg, msg),
-  error: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('error', dataOrMsg, msg),
-  fatal: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
-    log('fatal', dataOrMsg, msg),
+type LoggerLike = {
+  level: string;
+  child(bindings: Record<string, unknown>): LoggerLike;
+  trace(dataOrMsg: unknown, msg?: string): void;
+  debug(dataOrMsg: unknown, msg?: string): void;
+  info(dataOrMsg: unknown, msg?: string): void;
+  warn(dataOrMsg: unknown, msg?: string): void;
+  error(dataOrMsg: unknown, msg?: string): void;
+  fatal(dataOrMsg: unknown, msg?: string): void;
 };
+
+function createLogger(bindings: Record<string, unknown> = {}): LoggerLike {
+  const withBindings = (dataOrMsg: unknown): unknown => {
+    if (bindings && Object.keys(bindings).length > 0) {
+      if (dataOrMsg && typeof dataOrMsg === 'object' && !Array.isArray(dataOrMsg)) {
+        return { ...bindings, ...(dataOrMsg as Record<string, unknown>) };
+      }
+      return { ...bindings, value: dataOrMsg };
+    }
+    return dataOrMsg;
+  };
+
+  return {
+    level: currentLevel || 'info',
+    child(childBindings: Record<string, unknown>) {
+      return createLogger({ ...bindings, ...childBindings });
+    },
+    trace(dataOrMsg: unknown, msg?: string) {
+      log('debug', withBindings(dataOrMsg), msg);
+    },
+    debug(dataOrMsg: unknown, msg?: string) {
+      log('debug', withBindings(dataOrMsg), msg);
+    },
+    info(dataOrMsg: unknown, msg?: string) {
+      log('info', withBindings(dataOrMsg), msg);
+    },
+    warn(dataOrMsg: unknown, msg?: string) {
+      log('warn', withBindings(dataOrMsg), msg);
+    },
+    error(dataOrMsg: unknown, msg?: string) {
+      log('error', withBindings(dataOrMsg), msg);
+    },
+    fatal(dataOrMsg: unknown, msg?: string) {
+      log('fatal', withBindings(dataOrMsg), msg);
+    },
+  };
+}
+
+export const logger = createLogger();
 
 // Route uncaught errors through logger so they get timestamps in stderr
 process.on('uncaughtException', (err) => {
