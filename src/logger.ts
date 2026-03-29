@@ -43,11 +43,7 @@ function ts(): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`;
 }
 
-function log(
-  level: Level,
-  dataOrMsg: unknown,
-  msg?: string,
-): void {
+function log(level: Level, dataOrMsg: unknown, msg?: string): void {
   if (LEVELS[level] < threshold) return;
   const tag = `${COLORS[level]}${level.toUpperCase()}${level === 'fatal' ? FULL_RESET : RESET}`;
   const stream = LEVELS[level] >= LEVELS.warn ? process.stderr : process.stdout;
@@ -80,7 +76,11 @@ type LoggerLike = {
 function createLogger(bindings: Record<string, unknown> = {}): LoggerLike {
   const withBindings = (dataOrMsg: unknown): unknown => {
     if (bindings && Object.keys(bindings).length > 0) {
-      if (dataOrMsg && typeof dataOrMsg === 'object' && !Array.isArray(dataOrMsg)) {
+      if (
+        dataOrMsg &&
+        typeof dataOrMsg === 'object' &&
+        !Array.isArray(dataOrMsg)
+      ) {
         return { ...bindings, ...(dataOrMsg as Record<string, unknown>) };
       }
       return { ...bindings, value: dataOrMsg };
