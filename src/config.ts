@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 
+import { forkConfig } from './custom/config.js';
 import { readEnvFile } from './env.js';
 import { isValidTimezone } from './timezone.js';
 
@@ -12,10 +13,6 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ONLY',
-  'INJECT_SECRET',
-  'INJECT_HOST',
-  'INJECT_PORT',
-  'CREDENTIAL_PROXY_PORT',
   'TZ',
 ]);
 
@@ -59,12 +56,9 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
-export const CREDENTIAL_PROXY_PORT = parseInt(
-  process.env.CREDENTIAL_PROXY_PORT ||
-    envConfig.CREDENTIAL_PROXY_PORT ||
-    '3001',
-  10,
-);
+export const CREDENTIAL_PROXY_PORT = forkConfig.credentialProxyPort;
+export const ONECLI_URL = forkConfig.onecliUrl;
+export const MAX_MESSAGES_PER_PROMPT = forkConfig.maxMessagesPerPrompt;
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
@@ -109,14 +103,9 @@ export const TIMEZONE = resolveConfigTimezone();
 // INJECT_HOST: bind address — set to your Tailscale IP (100.x.x.x) so only
 //              Tailscale peers can reach it (defaults to loopback/dev only)
 // INJECT_PORT: TCP port (default 3721)
-export const INJECT_SECRET =
-  process.env.INJECT_SECRET || envConfig.INJECT_SECRET || '';
-export const INJECT_HOST =
-  process.env.INJECT_HOST || envConfig.INJECT_HOST || '127.0.0.1';
-export const INJECT_PORT = parseInt(
-  process.env.INJECT_PORT || envConfig.INJECT_PORT || '3721',
-  10,
-);
+export const INJECT_SECRET = forkConfig.inject.secret;
+export const INJECT_HOST = forkConfig.inject.host;
+export const INJECT_PORT = forkConfig.inject.port;
 
 // Telegram configuration
 export const TELEGRAM_BOT_TOKEN =
