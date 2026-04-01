@@ -70,7 +70,7 @@ describe('inject server', () => {
     expect(messages[0].content).toBe('hello');
   });
 
-  it('accepts wrapped email content on /inject/email', async () => {
+  it('accepts structured email payloads on /inject/email', async () => {
     const response = await fetch(`${baseUrl}/inject/email`, {
       method: 'POST',
       headers: {
@@ -80,8 +80,17 @@ describe('inject server', () => {
       body: JSON.stringify({
         chatJid: 'group@g.us',
         senderName: 'Mailbox',
-        messageId: '<id@example.com>',
-        wrappedEmail: '<untrusted>From: a@example.com\n\nhello</untrusted>',
+        email: {
+          messageId: 'id@example.com',
+          from: {
+            address: 'a@example.com',
+            name: 'Alice',
+          },
+          subject: 'hello',
+          date: '2026-03-31T22:00:00+00:00',
+          body: 'email body',
+          urls: ['https://example.com'],
+        },
       }),
     });
 
@@ -90,7 +99,11 @@ describe('inject server', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].sender).toBe('inject-email');
     expect(messages[0].content).toContain('Forwarded email.');
-    expect(messages[0].content).toContain('<untrusted>From: a@example.com');
+    expect(messages[0].content).toContain('<untrusted>{');
+    expect(messages[0].content).toContain('"type": "forwarded_email"');
+    expect(messages[0].content).toContain('"senderName": "Mailbox"');
+    expect(messages[0].content).toContain('"subject": "hello"');
+    expect(messages[0].content).toContain('"urls": [');
   });
 
   it('returns 405 for wrong-method requests to existing inject routes', async () => {
@@ -104,7 +117,7 @@ describe('inject server', () => {
     });
   });
 
-  it('rejects email requests without wrapped content', async () => {
+  it('still accepts legacy wrapped email content on /inject/email', async () => {
     const response = await fetch(`${baseUrl}/inject/email`, {
       method: 'POST',
       headers: {
@@ -113,13 +126,31 @@ describe('inject server', () => {
       },
       body: JSON.stringify({
         chatJid: 'group@g.us',
-        wrappedEmail: 'hello',
+        wrappedEmail: '<untrusted>From: a@example.com\n\nhello</untrusted>',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const messages = getMessagesSince('group@g.us', '', 'Andy');
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toContain('<untrusted>From: a@example.com');
+  });
+
+  it('rejects email requests without email content', async () => {
+    const response = await fetch(`${baseUrl}/inject/email`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        chatJid: 'group@g.us',
       }),
     });
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: 'missing opening untrusted marker',
+      error: 'email or wrappedEmail is required',
     });
   });
 });
