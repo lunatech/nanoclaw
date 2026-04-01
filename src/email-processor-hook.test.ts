@@ -46,7 +46,13 @@ describe('email-processor-hook', () => {
   it('runs only for main-group injected emails', () => {
     expect(
       shouldRunEmailProcessor(
-        { name: 'Main', folder: 'main', trigger: '@Andy', added_at: 'x', isMain: true },
+        {
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: 'x',
+          isMain: true,
+        },
         {
           id: '1',
           chat_jid: 'tg:1',
@@ -84,7 +90,13 @@ describe('email-processor-hook', () => {
     });
 
     const runPromise = runEmailProcessorForMessage(
-      { name: 'Main', folder: 'main', trigger: '@Andy', added_at: 'x', isMain: true },
+      {
+        name: 'Main',
+        folder: 'main',
+        trigger: '@Andy',
+        added_at: 'x',
+        isMain: true,
+      },
       {
         id: 'msg-1',
         chat_jid: 'tg:1',
@@ -100,13 +112,15 @@ describe('email-processor-hook', () => {
 
     expect(spawnMock).toHaveBeenCalledWith(
       'python3',
-      [getEmailProcessorScriptPath({
-        name: 'Main',
-        folder: 'main',
-        trigger: '@Andy',
-        added_at: 'x',
-        isMain: true,
-      })],
+      [
+        getEmailProcessorScriptPath({
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: 'x',
+          isMain: true,
+        }),
+      ],
       expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
     );
     expect(written).toBe('Forwarded email payload');

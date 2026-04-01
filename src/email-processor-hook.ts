@@ -10,7 +10,9 @@ export function shouldRunEmailProcessor(
   group: RegisteredGroup | undefined,
   msg: NewMessage,
 ): boolean {
-  return Boolean(group?.isMain && msg.sender === 'inject-email' && !msg.is_from_me);
+  return Boolean(
+    group?.isMain && msg.sender === 'inject-email' && !msg.is_from_me,
+  );
 }
 
 export function getEmailProcessorScriptPath(group: RegisteredGroup): string {

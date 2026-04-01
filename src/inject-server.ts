@@ -78,7 +78,13 @@ function queueEmailInject(
   },
   timestamp: string,
 ): void {
-  const { chatJid, wrappedEmail, senderName = 'email', messageId, email } = data;
+  const {
+    chatJid,
+    wrappedEmail,
+    senderName = 'email',
+    messageId,
+    email,
+  } = data;
   if (!email && !wrappedEmail) {
     sendJson(400, { error: 'email or wrappedEmail is required' });
     return;
@@ -176,13 +182,21 @@ function validateEmailPayload(email: {
   if (!email.from.address || typeof email.from.address !== 'string') {
     return 'email.from.address is required';
   }
-  if (email.from.name !== undefined && email.from.name !== null && typeof email.from.name !== 'string') {
+  if (
+    email.from.name !== undefined &&
+    email.from.name !== null &&
+    typeof email.from.name !== 'string'
+  ) {
     return 'email.from.name must be a string';
   }
   if (!email.subject || typeof email.subject !== 'string') {
     return 'email.subject is required';
   }
-  if (email.date !== undefined && email.date !== null && typeof email.date !== 'string') {
+  if (
+    email.date !== undefined &&
+    email.date !== null &&
+    typeof email.date !== 'string'
+  ) {
     return 'email.date must be a string';
   }
   if (!email.body || typeof email.body !== 'string') {
@@ -192,7 +206,10 @@ function validateEmailPayload(email: {
     return 'email.messageId must be a string';
   }
   if (email.urls !== undefined) {
-    if (!Array.isArray(email.urls) || email.urls.some((url) => typeof url !== 'string')) {
+    if (
+      !Array.isArray(email.urls) ||
+      email.urls.some((url) => typeof url !== 'string')
+    ) {
       return 'email.urls must be an array of strings';
     }
   }
