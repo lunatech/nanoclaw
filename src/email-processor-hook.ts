@@ -5,6 +5,7 @@ import path from 'path';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { NewMessage, RegisteredGroup } from './types.js';
+import { tryParseSingleUntrustedBlock } from './untrusted-content.js';
 
 export function shouldRunEmailProcessor(
   group: RegisteredGroup | undefined,
@@ -17,6 +18,52 @@ export function shouldRunEmailProcessor(
 
 export function getEmailProcessorScriptPath(group: RegisteredGroup): string {
   return path.join(resolveGroupFolderPath(group.folder), 'email-processor.py');
+}
+
+function getJsonPayloadKeys(msg: NewMessage): {
+  payloadKeys?: string[];
+  decodedPayloadKeys?: string[];
+  emailKeys?: string[];
+} {
+  const parsed = tryParseSingleUntrustedBlock(msg.content);
+  if (!parsed) return {};
+
+  try {
+    const payload = JSON.parse(parsed.content) as Record<string, unknown>;
+    const payloadKeys = Object.keys(payload);
+
+    if (
+      payload.type === 'encoded_forwarded_email' &&
+      payload.encoding === 'base64-json' &&
+      typeof payload.payload === 'string'
+    ) {
+      const decoded = JSON.parse(
+        Buffer.from(payload.payload, 'base64').toString('utf-8'),
+      ) as Record<string, unknown>;
+      return {
+        payloadKeys,
+        decodedPayloadKeys: Object.keys(decoded),
+        emailKeys:
+          decoded.email &&
+          typeof decoded.email === 'object' &&
+          !Array.isArray(decoded.email)
+            ? Object.keys(decoded.email as Record<string, unknown>)
+            : undefined,
+      };
+    }
+
+    return {
+      payloadKeys,
+      emailKeys:
+        payload.email &&
+        typeof payload.email === 'object' &&
+        !Array.isArray(payload.email)
+          ? Object.keys(payload.email as Record<string, unknown>)
+          : undefined,
+    };
+  } catch {
+    return {};
+  }
 }
 
 export async function runEmailProcessorForMessage(
@@ -37,7 +84,7 @@ export async function runEmailProcessorForMessage(
       chatJid: msg.chat_jid,
       messageId: msg.id,
       contentLength: msg.content.length,
-      contentPreview: msg.content.slice(0, 200),
+      ...getJsonPayloadKeys(msg),
     },
     'Email processor piping message content to stdin',
   );
