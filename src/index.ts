@@ -65,6 +65,10 @@ import {
   stopRemoteControl,
 } from './remote-control.js';
 import {
+  runEmailProcessorForMessage,
+  shouldRunEmailProcessor,
+} from './email-processor-hook.js';
+import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -686,6 +690,15 @@ async function main(): Promise<void> {
         return;
       }
       storeMessage(msg);
+      const group = registeredGroups[chatJid];
+      if (shouldRunEmailProcessor(group, msg)) {
+        runEmailProcessorForMessage(group!, msg).catch((err) =>
+          logger.error(
+            { err, chatJid, messageId: msg.id },
+            'Email processor invocation failed',
+          ),
+        );
+      }
     },
     onChatMetadata: (
       chatJid: string,

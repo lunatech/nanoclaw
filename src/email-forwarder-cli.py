@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timedelta, tzinfo
 
 try:
     from html import unescape as html_unescape
@@ -19,7 +20,7 @@ except ImportError:
 
 from email import header as email_header
 from email.parser import Parser
-from email.utils import parseaddr
+from email.utils import mktime_tz, parseaddr, parsedate_tz
 
 try:
     from urllib.error import HTTPError, URLError
@@ -29,8 +30,25 @@ except ImportError:
 
 
 MAX_MIME_DEPTH = 10
-UNTRUSTED_OPEN_TAG = "<untrusted>"
-UNTRUSTED_CLOSE_TAG = "</untrusted>"
+
+
+class FixedOffsetTZ(tzinfo):
+    def __init__(self, offset_minutes):
+        self._offset = timedelta(minutes=offset_minutes)
+
+    def utcoffset(self, dt):
+        return self._offset
+
+    def tzname(self, dt):
+        total_minutes = int(self._offset.total_seconds() // 60)
+        sign = "+" if total_minutes >= 0 else "-"
+        total_minutes = abs(total_minutes)
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
+        return "%s%02d:%02d" % (sign, hours, minutes)
+
+    def dst(self, dt):
+        return timedelta(0)
 
 
 def require_env(name):
@@ -38,6 +56,11 @@ def require_env(name):
     if not value:
         raise RuntimeError("%s is required" % name)
     return value
+
+
+def env_flag(name):
+    value = os.environ.get(name, "")
+    return value.lower() in ("1", "true", "yes", "on")
 
 
 def normalize_newlines(text):
@@ -89,6 +112,18 @@ def derive_sender_name(message):
     return "email"
 
 
+def parse_sender(message):
+    from_header = message.get("From", "")
+    decoded = decode_mime_words(from_header).strip()
+    display_name, address = parseaddr(decoded)
+    cleaned_name = display_name.strip().strip('"') if display_name else None
+    cleaned_address = address.strip() if address else ""
+    return {
+        "address": cleaned_address or "unknown@unknown.com",
+        "name": cleaned_name,
+    }
+
+
 def normalize_text_body(text):
     normalized = normalize_newlines(text)
     normalized = re.sub(r"[ \t]+\n", "\n", normalized)
@@ -109,6 +144,38 @@ def html_to_text(value):
     return normalize_text_body(html_unescape(text))
 
 
+def extract_urls_from_html(html_content):
+    urls = []
+    seen = set()
+    for match in re.finditer(r"""href\s*=\s*["']([^"']+)["']""", html_content, re.I):
+        url = html_unescape(match.group(1)).strip()
+        if not url or url.startswith(("#", "mailto:", "tel:")):
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
+def parse_email_date(value):
+    if not value:
+        return None
+
+    parsed = parsedate_tz(value)
+    if parsed is None:
+        return None
+
+    offset_seconds = parsed[9]
+    timestamp = mktime_tz(parsed)
+    if offset_seconds is None:
+        return datetime.utcfromtimestamp(timestamp).isoformat() + "Z"
+
+    offset_minutes = int(offset_seconds // 60)
+    tz = FixedOffsetTZ(offset_minutes)
+    return datetime.fromtimestamp(timestamp, tz).isoformat()
+
+
 def part_has_payload(part):
     payload = part.get_payload(decode=True)
     if payload:
@@ -121,14 +188,15 @@ def part_has_payload(part):
 
 def parse_entity(message, depth):
     if depth > MAX_MIME_DEPTH:
-        return {"text_plain": [], "text_html": [], "has_attachment": True}
+        return {"text_plain": [], "text_html": [], "urls": [], "has_attachment": True}
 
     if message.is_multipart():
-        merged = {"text_plain": [], "text_html": [], "has_attachment": False}
+        merged = {"text_plain": [], "text_html": [], "urls": [], "has_attachment": False}
         for child in message.get_payload():
             child_result = parse_entity(child, depth + 1)
             merged["text_plain"].extend(child_result["text_plain"])
             merged["text_html"].extend(child_result["text_html"])
+            merged["urls"].extend(child_result["urls"])
             merged["has_attachment"] = (
                 merged["has_attachment"] or child_result["has_attachment"]
             )
@@ -139,7 +207,7 @@ def parse_entity(message, depth):
     filename = message.get_filename()
 
     if "attachment" in disposition or filename:
-        return {"text_plain": [], "text_html": [], "has_attachment": True}
+        return {"text_plain": [], "text_html": [], "urls": [], "has_attachment": True}
 
     payload_bytes = message.get_payload(decode=True)
     charset = message.get_content_charset() or "utf-8"
@@ -159,6 +227,7 @@ def parse_entity(message, depth):
         return {
             "text_plain": [normalize_text_body(decoded_body)],
             "text_html": [],
+            "urls": [],
             "has_attachment": False,
         }
 
@@ -166,37 +235,17 @@ def parse_entity(message, depth):
         return {
             "text_plain": [],
             "text_html": [html_to_text(decoded_body)],
+            "urls": extract_urls_from_html(decoded_body),
             "has_attachment": False,
         }
 
     if part_has_payload(message):
-        return {"text_plain": [], "text_html": [], "has_attachment": True}
+        return {"text_plain": [], "text_html": [], "urls": [], "has_attachment": True}
 
-    return {"text_plain": [], "text_html": [], "has_attachment": False}
-
-
-def collect_forwarded_text(headers_text, body_text):
-    decoded_headers = []
-    for line in unfold_header_lines(headers_text):
-        separator = line.find(":")
-        if separator == -1:
-            decoded_headers.append(decode_mime_words(line))
-            continue
-        key = line[:separator]
-        value = line[separator + 1 :].strip()
-        decoded_headers.append("%s: %s" % (key, decode_mime_words(value)))
-
-    sections = ["Forwarded email (full text):"]
-    trimmed_headers = "\n".join(decoded_headers).strip()
-    if trimmed_headers:
-        sections.append(trimmed_headers)
-    sections.append("")
-    sections.append(body_text)
-    return "\n".join(sections).strip()
+    return {"text_plain": [], "text_html": [], "urls": [], "has_attachment": False}
 
 
 def parse_email(raw_email):
-    headers_text, _body = split_header_section(raw_email)
     message = Parser().parsestr(raw_email)
     entity = parse_entity(message, 0)
 
@@ -211,16 +260,23 @@ def parse_email(raw_email):
                 body_text = value
                 break
 
+    sender = parse_sender(message)
+    sender_name = sender["name"] or sender["address"] or "email"
+    subject = decode_mime_words(message.get("Subject", "")).strip() or "No Subject"
+
     return {
-        "message_id": message.get("Message-ID"),
-        "sender_name": derive_sender_name(message),
+        "message_id": (message.get("Message-ID") or "").strip().strip("<>") or None,
+        "sender_name": sender_name,
         "has_attachment": entity["has_attachment"],
-        "forwarded_text": collect_forwarded_text(headers_text, body_text),
+        "email_data": {
+            "messageId": (message.get("Message-ID") or "").strip().strip("<>") or None,
+            "from": sender,
+            "subject": subject,
+            "date": parse_email_date(message.get("Date")),
+            "body": body_text,
+            "urls": entity.get("urls", []),
+        },
     }
-
-
-def wrap_untrusted_content(text):
-    return "%s%s%s" % (UNTRUSTED_OPEN_TAG, text, UNTRUSTED_CLOSE_TAG)
 
 
 def post_email(endpoint, token, payload):
@@ -237,6 +293,7 @@ def main():
     token = require_env("INJECT_SECRET")
     chat_jid = require_env("INJECT_CHAT_JID")
     sender_name = os.environ.get("INJECT_EMAIL_SENDER_NAME")
+    debug_json = env_flag("INJECT_EMAIL_DEBUG_JSON")
 
     raw_email = sys.stdin.read()
     parsed = parse_email(raw_email)
@@ -253,10 +310,14 @@ def main():
     payload = {
         "chatJid": chat_jid,
         "senderName": sender_name or parsed["sender_name"] or "email",
-        "wrappedEmail": wrap_untrusted_content(parsed["forwarded_text"]),
+        "email": parsed["email_data"],
     }
-    if parsed["message_id"]:
-        payload["messageId"] = parsed["message_id"]
+    if debug_json:
+        print(
+            "email forwarder payload:\n%s"
+            % json.dumps(payload, indent=2, sort_keys=True),
+            file=sys.stderr,
+        )
 
     try:
         response = post_email(endpoint, token, payload)
